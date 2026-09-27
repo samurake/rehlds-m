@@ -24,6 +24,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Model {
     /** @brief The maximum capacity of the history buffer. */
@@ -91,5 +92,6 @@ namespace Model {
 
         /// The name of the file to load and save history from/to.
         std::string filename_{};
+        std::vector<std::string> history_lines_{};
     };
 }

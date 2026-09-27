@@ -19,123 +19,165 @@
  */
 
 #include "model/server_loop.hpp"
+#include "model/console_commands.hpp"
 #include "common/engine/interface/dedicated_serverapi_interface.hpp"
+#include "util/logger.hpp"
 #include <algorithm>
-#include <cassert>
-#include <chrono>
-#include <cmath>
-#include <utility>
-
+#include <cstring>
 #ifdef _WIN32
-  #include "util/windows/system/ntdll.hpp"
-#else
-  #include <thread>
+#include "util/windows/system/ntdll.hpp"
 #endif
 
 namespace {
-    /// Checks if it is time to update the status of the server.
-    ATTR_HOT bool is_time_to_update() noexcept
+    bool is_command(std::string_view input, std::string_view command)
     {
-        using namespace std::chrono;
-
-        constexpr auto update_interval = milliseconds{500};
-        static auto last_update_time = high_resolution_clock::now();
-
-        const auto current_time = high_resolution_clock::now(); // -V656
-        const auto elapsed_time = duration_cast<milliseconds>(current_time - last_update_time);
-
-        if (elapsed_time >= update_interval) {
-            last_update_time = current_time;
-            return true;
+        while (!input.empty() && (input.front() == ' ' || input.front() == '\t')) input.remove_prefix(1);
+        while (!input.empty() && (input.back() == ' ' || input.back() == '\t')) input.remove_suffix(1);
+        if (input.size() != command.size()) return false;
+        for (std::size_t i = 0; i < input.size(); ++i) {
+            auto ch = input[i];
+            if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch + ('a' - 'A'));
+            if (ch != command[i]) return false;
         }
-
-        return false;
-    }
-
-    /// Calculates an adaptive smoothing coefficient for use in an exponential moving average calculation.
-    ATTR_HOT double calculate_adaptive_smoothing_coefficient(
-      const std::chrono::nanoseconds& duration, const std::chrono::nanoseconds& ama_duration) noexcept
-    {
-        constexpr auto fast_smoothing_coefficient = 1.0;
-        constexpr auto slow_smoothing_coefficient = 0.1;
-
-        if (0 == ama_duration.count()) {
-            return fast_smoothing_coefficient;
-        }
-
-        return fast_smoothing_coefficient +
-               ((slow_smoothing_coefficient - fast_smoothing_coefficient) *
-                std::exp(-std::abs((duration.count() - ama_duration.count()) / ama_duration.count())));
+        return true;
     }
 }
-
 namespace Model {
-    void ServerLoop::run(Common::DedicatedServerApiInterface& serverapi_interface, int target_fps) noexcept
+    void CompletionRequest::cancel()
     {
-        assert(target_fps > 0);
-
-        constexpr auto fps_increase_factor = 1.015;
-        target_fps = static_cast<int>(target_fps * fps_increase_factor);
-
-        const auto target_sleep_duration = std::chrono::nanoseconds(1'000'000'000 / target_fps);
-        auto ama_duration = std::chrono::nanoseconds{0}; // Adaptive moving average of loop execution times
-
+        { const std::scoped_lock lock{mutex_}; cancelled_ = true; }
+        available_.notify_all();
+    }
+    void CompletionRequest::complete(std::vector<std::string> matches)
+    {
+        {
+            const std::scoped_lock lock{mutex_};
+            if (cancelled_) return;
+            matches_ = std::move(matches); done_ = true;
+        }
+        available_.notify_all();
+    }
+    std::vector<std::string> CompletionRequest::wait(std::stop_token stop, std::chrono::milliseconds timeout)
+    {
+        std::stop_callback wake{stop, [this] { cancel(); }};
+        std::unique_lock lock{mutex_};
+        if (!available_.wait_for(lock, timeout, [this] { return done_ || cancelled_; })) cancelled_ = true;
+        return cancelled_ ? std::vector<std::string>{} : std::move(matches_);
+    }
+    bool ServerLoop::enqueue_input(std::string_view input)
+    {
+        if (closed_.load() || input.empty() || input.size() > MAX_COMMAND_LENGTH ||
+            input.find_first_of(std::string_view{"\0\r\n", 3}) != std::string_view::npos) return false;
+        if (is_command(input, "quit")) { quit_requested_.store(true); return true; }
+        ConsoleCommand command{};
+        std::memcpy(command.text.data(), input.data(), input.size());
+        command.text[input.size()] = '\n';
+        return input_queue_.push(std::move(command));
+    }
+    std::shared_ptr<CompletionRequest> ServerLoop::request_completion(std::string_view query)
+    {
+        if (closed_.load() || query.empty() || query.size() > MAX_COMMAND_LENGTH) return {};
+        auto request = std::make_shared<CompletionRequest>(query);
+        if (!completion_queue_.push(request)) { request->cancel(); return {}; }
+        return request;
+    }
+    void ServerLoop::close()
+    {
+        closed_.store(true);
+        input_queue_.close(); completion_queue_.close();
+        while (auto request = completion_queue_.try_pop()) (*request)->cancel();
+        while (input_queue_.try_pop()) {}
+    }
+    void ServerLoop::run(Common::DedicatedServerApiInterface& api, const int target_fps) noexcept
+    {
+        if (target_fps < 1 || target_fps > MAX_TARGET_FPS) {
+            Util::log_error("Target FPS must be between 1 and {}.", MAX_TARGET_FPS);
+            close(); return;
+        }
 #ifdef _WIN32
-        ::LARGE_INTEGER interval{};
         Util::ntdll::set_timer_resolution_or_abort(1);
 #endif
-
-        while (serverapi_interface.run_frame()) {
-            const auto start_time = std::chrono::steady_clock::now();
-
-#ifdef _WIN32
-            const auto sleep_duration = std::max(std::chrono::nanoseconds{100}, target_sleep_duration - ama_duration);
-            interval.QuadPart = sleep_duration.count() / (-100LL);
-            Util::ntdll::delay_execution(FALSE, &interval);
-            update_status(serverapi_interface);
-#else
-            const auto sleep_duration = std::max(std::chrono::nanoseconds{1}, target_sleep_duration - ama_duration);
-            std::this_thread::sleep_for(sleep_duration);
-#endif
-            process_tasks();
-            process_input(serverapi_interface);
-
-            const auto end_time = std::chrono::steady_clock::now();
-            const auto duration = end_time - start_time - sleep_duration;
-            const auto alpha = calculate_adaptive_smoothing_coefficient(duration, ama_duration);
-
-            ama_duration =
-              std::chrono::duration_cast<std::chrono::nanoseconds>((alpha * duration) + ((1 - alpha) * ama_duration));
+        FramePacer pacer{FrameClock::now(), std::chrono::nanoseconds{1'000'000'000 / target_fps}};
+        while (!stop_requested_.load()) {
+            const auto start = FrameClock::now();
+            if (!execute_frame(api)) break;
+            const auto work_end = FrameClock::now();
+            const auto deadline = pacer.deadline();
+            const bool over_budget = work_end > deadline;
+            if (!over_budget) FrameClock::sleep_until(deadline);
+            const auto wake = FrameClock::now();
+            finish_frame(start, over_budget ? 1 : 0, over_budget ? std::chrono::nanoseconds{} : wake - deadline);
+            pacer.advance(FrameClock::now());
         }
+        close();
+        if (metrics_interval_) report_metrics();
     }
-
+    bool ServerLoop::execute_frame(Common::DedicatedServerApiInterface& api)
+    {
+        // Submit input before the engine call, avoiding an extra frame of command latency.
+        process_input(api);
+        const auto start = FrameClock::now();
+        if (!api.run_frame()) return false;
+        metrics_.engine_time(FrameClock::now() - start);
+        process_tasks();
+        update_status(api);
+        // Reporting is part of this iteration's work budget, before deciding to sleep.
+        const auto now = FrameClock::now();
+        if (metrics_interval_) {
+            if (next_metrics_report_ == FrameClock::time_point{})
+                next_metrics_report_ = now + std::chrono::seconds{metrics_interval_};
+            if (now >= next_metrics_report_) {
+                report_metrics();
+                next_metrics_report_ = FrameClock::now() + std::chrono::seconds{metrics_interval_};
+            }
+        }
+        return true;
+    }
     void ServerLoop::process_tasks()
     {
-        if (!task_queue_.empty()) {
-            const auto task = task_queue_.pop();
-            task();
+        // At most one completion per iteration. Engine API remains on this thread.
+        if (auto request = completion_queue_.try_pop()) {
+            if (!(*request)->cancelled()) {
+                (*request)->complete(console_commands_ ? console_commands_->find_command_matches((*request)->query())
+                                                       : std::vector<std::string>{});
+            }
         }
     }
-
-    void ServerLoop::process_input(Common::DedicatedServerApiInterface& serverapi_interface)
+    void ServerLoop::process_input(Common::DedicatedServerApiInterface& api)
     {
-        if (!input_queue_.empty()) {
-            const auto input = input_queue_.pop();
-            serverapi_interface.add_console_text(input.c_str());
+        if (quit_requested_.exchange(false)) { api.add_console_text("quit\n"); return; }
+        for (unsigned i = 0; i < 4; ++i) {
+            auto input = input_queue_.try_pop();
+            if (!input) break;
+            const std::string_view command{input->text.data()};
+            if (is_command(command.substr(0, command.size() - 1), "rehldsm_stats")) report_metrics();
+            else api.add_console_text(input->text.data());
         }
     }
-
-    void ServerLoop::update_status(Common::DedicatedServerApiInterface& serverapi_interface)
+    void ServerLoop::finish_frame(FrameClock::time_point start, std::uint64_t missed,
+                                  std::chrono::nanoseconds wake_lateness)
     {
-        if (!is_time_to_update()) {
-            return;
-        }
-
-        status_.current_map.clear();
-        status_.current_map.resize(32U, '\0');
-        serverapi_interface.update_status(
-          &status_.fps, &status_.num_players, &status_.max_players, status_.current_map.data());
-
+        metrics_.record(FrameClock::now() - start, wake_lateness, missed != 0);
+    }
+    void ServerLoop::report_metrics()
+    {
+        const auto s = metrics_.summary();
+        Util::log_info("[ReHLDS-M] launcher_iterations={} window={} frame_us(p50/p95/p99)={:.1f}/{:.1f}/{:.1f} "
+                       "engine_call_p99_us={:.1f} wake_p99_us={:.1f} max_frame_us={:.1f} over_budget_frames={} "
+                       "engine_reported_fps={:.1f} input_high_water={} input_rejected={} completion_rejected={}\n",
+                       s.frames, s.samples, s.frame_p50_us, s.frame_p95_us, s.frame_p99_us,
+                       s.engine_p99_us, s.wake_p99_us, s.max_frame_us, s.over_budget_frames,
+                       status_.fps, input_queue_.high_watermark(), input_queue_.rejected(), completion_queue_.rejected());
+    }
+    void ServerLoop::update_status(Common::DedicatedServerApiInterface& api)
+    {
+        const auto now = FrameClock::now();
+        if (now - last_status_update_ < std::chrono::milliseconds{500}) return;
+        last_status_update_ = now;
+        status_.current_map.assign(32, '\0');
+        api.update_status(&status_.fps, &status_.num_players, &status_.max_players, status_.current_map.data());
+        status_.current_map.back() = '\0';
+        status_.current_map.resize(status_.current_map.find('\0'));
         notify(ServerLoopEvent::status_updated);
     }
 }

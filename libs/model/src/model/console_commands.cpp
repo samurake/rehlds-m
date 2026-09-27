@@ -38,17 +38,20 @@ namespace Model {
             return matches;
         }
 
+        matches.reserve(64);
         Common::ObjectList object_list{};
         system_interface_->get_command_matches(command.c_str(), &object_list);
 
         for (const auto* const object : object_list) {
+            if (matches.size() == 256) break;
             const auto* const command_match = static_cast<const char*>(object);
 
             if ((nullptr == command_match) || ('\0' == *command_match)) {
                 continue;
             }
 
-            if (const auto& command_string = Util::str::trim(command_match); !command_string.empty()) {
+            if (const auto& command_string = Util::str::trim(command_match);
+                !command_string.empty() && command_string.size() <= 1022) {
                 matches.emplace_back(Util::str::to_lower(command_string));
             }
         }

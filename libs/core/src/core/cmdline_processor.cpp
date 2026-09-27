@@ -48,7 +48,8 @@ namespace {
       public:
         void handle(Core::CmdLineArgs& args) override
         {
-            if (args.contains("targetfps")) {
+            if (const auto fps = args.get_argument_option_as<int>("targetfps");
+                fps && *fps > 0 && *fps <= 10000) {
                 args.remove("pingboost");
                 args.push_back("+sys_ticrate", "0");
             }

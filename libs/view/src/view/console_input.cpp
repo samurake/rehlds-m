@@ -89,41 +89,30 @@ namespace {
 }
 
 namespace View {
-    ConsoleInput::ConsoleInput(InputPresenterPtr input_presenter) : input_presenter_(std::move(input_presenter))
+    ConsoleInput::ConsoleInput(InputPresenter& input_presenter) : input_presenter_(input_presenter)
     {
-        assert(input_presenter_ != nullptr);
+        input_line_.reserve(Model::ServerLoop::MAX_COMMAND_LENGTH);
         start();
     }
-
-    ConsoleInput::~ConsoleInput()
-    {
-        stop();
-    }
-
+    ConsoleInput::~ConsoleInput() { stop(); }
     void ConsoleInput::start()
     {
-        if (running_) {
-            return;
+        if (!input_thread_.joinable()) {
+            input_thread_ = std::jthread([this](std::stop_token stop) {
+                stop_token_ = stop;
+                read_input(stop);
+            });
         }
-
-        running_ = true;
-        input_thread_ = std::thread{&ConsoleInput::read_input, this};
-
-        using namespace std::chrono_literals;
-        std::this_thread::sleep_for(10ms);
     }
-
     void ConsoleInput::stop()
     {
-        if (running_) {
-            running_ = false;
-            input_thread_.join();
-        }
+        input_thread_.request_stop();
+        if (input_thread_.joinable()) input_thread_.join();
     }
 
     void ConsoleInput::handle_up_arrow()
     {
-        if (const auto& previous_input = input_presenter_->history_previous(); previous_input) {
+        if (const auto& previous_input = input_presenter_.history_previous(); previous_input) {
             if (!saved_input_) {
                 saved_input_ = input_line_;
             }
@@ -137,7 +126,7 @@ namespace View {
 
     void ConsoleInput::handle_down_arrow()
     {
-        if (const auto& next_input = input_presenter_->history_next(); next_input || saved_input_) {
+        if (const auto& next_input = input_presenter_.history_next(); next_input || saved_input_) {
             if (clear_input(); next_input) {
                 input_line_ = *next_input;
             }
@@ -221,14 +210,17 @@ namespace View {
 
     void ConsoleInput::handle_tab()
     {
-        const auto& commands = input_presenter_->find_command_matches(input_line_);
+        if (line_overflow_) return;
+        const auto& commands = input_presenter_.find_command_matches(input_line_, stop_token_);
 
         if (commands.empty()) {
             return;
         }
 
         if (1U == commands.size()) {
+            if (commands.front().size() < input_line_.size()) return;
             const auto completion = commands.front().substr(input_line_.length()) + " ";
+            if (input_line_.size() + completion.size() > Model::ServerLoop::MAX_COMMAND_LENGTH) return;
             input_line_.append(completion);
             std::cout << completion;
         }
@@ -240,6 +232,7 @@ namespace View {
             std::cout << '\n';
 
             input_line_ = find_common_command_prefix(commands);
+            input_line_.resize((std::min)(input_line_.size(), Model::ServerLoop::MAX_COMMAND_LENGTH));
             std::cout << input_line_;
         }
 
@@ -249,7 +242,10 @@ namespace View {
     void ConsoleInput::handle_newline()
     {
         std::cout << '\n';
-        input_presenter_->enqueue_input(input_line_);
+        if (line_overflow_) Util::log_warn("Console command exceeds {} bytes; entire line rejected.", Model::ServerLoop::MAX_COMMAND_LENGTH);
+        else if (!input_line_.empty() && !input_presenter_.enqueue_input(input_line_))
+            Util::log_warn("Console command rejected: queue full or server shutting down.");
+        line_overflow_ = false;
         input_line_.clear();
         cursor_position_ = 0;
     }
@@ -260,6 +256,8 @@ namespace View {
             return;
         }
 
+        if (line_overflow_) return;
+        if (input_line_.size() >= Model::ServerLoop::MAX_COMMAND_LENGTH) { line_overflow_ = true; return; }
         input_line_.insert(cursor_position_, 1, ch);
         std::cout << (input_line_.c_str() + cursor_position_);
         ++cursor_position_;

@@ -338,3 +338,5 @@
 *.la        binary
 *.lai       binary
 *.lib       binary
+
+*.sh text eol=lf

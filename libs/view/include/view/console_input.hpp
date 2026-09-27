@@ -20,8 +20,7 @@
 
 #pragma once
 
-#include <atomic>
-#include <memory>
+#include <stop_token>
 #include <optional>
 #include <string>
 #include <thread>
@@ -37,16 +36,16 @@ namespace View {
     class ConsoleInput final {
       public:
         /**
-         * @brief Type alias for a shared pointer to an \c Presenter::InputPresenter
+         * @brief Input presenter type, owned by the runtime.
          */
-        using InputPresenterPtr = std::shared_ptr<Presenter::InputPresenter>;
+        using InputPresenter = Presenter::InputPresenter;
 
         /**
          * @brief Constructs a new ConsoleInput object.
          *
-         * @param input_presenter A shared pointer to an \c Presenter::InputPresenter object.
+         * @param input_presenter A presenter that outlives the input worker.
          */
-        explicit ConsoleInput(InputPresenterPtr input_presenter);
+        explicit ConsoleInput(InputPresenter& input_presenter);
 
         /// Move constructor.
         ConsoleInput(ConsoleInput&&) = delete;
@@ -76,27 +75,29 @@ namespace View {
         void stop();
 
       private:
-        /// A shared pointer to an \c Presenter::InputPresenter
-        InputPresenterPtr input_presenter_;
+        /// Borrowed presenter; the runtime joins this worker before destroying it.
+        InputPresenter& input_presenter_;
 
-        /// Indicates whether the input worker thread is running.
-        std::atomic<bool> running_{};
+        /// Cancellation token, accessed only by the input worker.
+        std::stop_token stop_token_{};
 
         /// The input worker thread.
-        std::thread input_thread_{};
+        std::jthread input_thread_{};
 
         /// The current input line.
         std::string input_line_{};
 
         /// Saved input line.
         std::optional<std::string> saved_input_{};
+        bool line_overflow_{};
 
         /// The current cursor position in the input line.
         std::string::size_type cursor_position_{};
 
 #ifndef _WIN32
         /// Handles ANSI escape codes.
-        void handle_escape();
+        void consume_byte(unsigned char ch);
+        unsigned escape_state_{};
 #endif
         /// Handles the up arrow key.
         void handle_up_arrow();
@@ -132,7 +133,7 @@ namespace View {
         void handle_char(std::string::value_type ch);
 
         /// Reads input from the console (runs in a separate thread).
-        void read_input();
+        void read_input(std::stop_token stop);
 
         /// Clears the current input line from the console.
         void clear_input();

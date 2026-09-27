@@ -209,3 +209,12 @@ namespace {
         ASSERT_EQ(lines[1], "test2");
     }
 }
+
+TEST(UserInputHistoryBounds, RejectsOverlongLines)
+{
+    Model::UserInputHistory history;
+    history.append(std::string(1023, 'x'));
+    EXPECT_FALSE(history.previous());
+    history.append(std::string(1022, 'y'));
+    ASSERT_TRUE(history.previous());
+}

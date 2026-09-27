@@ -104,7 +104,7 @@ namespace Util {
          *
          * Determines which messages will trigger a flush of the logger's buffer.
          */
-        LogLevel flush_on{LogLevel::trace};
+        LogLevel flush_on{LogLevel::warn};
 
         /**
          * @brief OutputType options for the logger.
@@ -159,7 +159,7 @@ namespace Util {
      * @param args The arguments to be used for formatting the message string.
      */
     template <typename... Args>
-    void log_info(const std::string_view str, Args&&... args)
+    void log_info(fmt::format_string<Args...> str, Args&&... args)
     {
         spdlog::info(str, std::forward<Args>(args)...);
     }
@@ -173,7 +173,7 @@ namespace Util {
      * @param args The arguments to be used for formatting the message string.
      */
     template <typename... Args>
-    void log_debug(const std::string_view str, Args&&... args)
+    void log_debug(fmt::format_string<Args...> str, Args&&... args)
     {
         spdlog::debug(str, std::forward<Args>(args)...);
     }
@@ -187,7 +187,7 @@ namespace Util {
      * @param args The arguments to be used for formatting the message string.
      */
     template <typename... Args>
-    void log_warn(const std::string_view str, Args&&... args)
+    void log_warn(fmt::format_string<Args...> str, Args&&... args)
     {
         spdlog::warn(str, std::forward<Args>(args)...);
     }
@@ -201,7 +201,7 @@ namespace Util {
      * @param args The arguments to be used for formatting the message string.
      */
     template <typename... Args>
-    void log_error(const std::string_view str, Args&&... args)
+    void log_error(fmt::format_string<Args...> str, Args&&... args)
     {
         spdlog::error(str, std::forward<Args>(args)...);
     }
@@ -215,7 +215,7 @@ namespace Util {
      * @param args The arguments to be used for formatting the message string.
      */
     template <typename... Args>
-    void log_critical(const std::string_view str, Args&&... args)
+    void log_critical(fmt::format_string<Args...> str, Args&&... args)
     {
         spdlog::critical(str, std::forward<Args>(args)...);
     }

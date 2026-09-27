@@ -32,5 +32,5 @@ namespace Core {
     void init_socket();
     void init_filesystem();
     void init_engine(const CmdLineArgs& args);
-    void init_server_loop(const CmdLineArgs& args, const std::shared_ptr<Model::ServerLoop>& server_loop);
+    bool init_server_loop(const CmdLineArgs& args, Model::ServerLoop& server_loop);
 }

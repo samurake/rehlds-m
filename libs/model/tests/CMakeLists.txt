@@ -22,6 +22,7 @@ set(CPP_SOURCES_DIR "${PROJECT_SOURCE_DIR}/src/${TESTED_TARGET_NAME}")
 target_sources("${TARGET_NAME}"
   PRIVATE
     "${CPP_SOURCES_DIR}/userinput_history.cpp"
+    "${CPP_SOURCES_DIR}/server_loop.cpp"
 )
 
 #-------------------------------------------------------------------------------
@@ -38,7 +39,7 @@ target_link_libraries("${TARGET_NAME}"
 # Test Configuration
 #-------------------------------------------------------------------------------
 
-gtest_discover_tests("${TARGET_NAME}")
+gtest_discover_tests("${TARGET_NAME}" PROPERTIES TIMEOUT 10)
 
 #-------------------------------------------------------------------------------
 # Code Coverage

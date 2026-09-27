@@ -39,11 +39,11 @@ set(CMAKE_C_FLAGS_DEBUG
 )
 
 set(CMAKE_C_FLAGS_RELEASE
-  "-O3 -fno-stack-protector -fomit-frame-pointer -DNDEBUG"
+  "-O3 -fstack-protector-strong -fomit-frame-pointer -DNDEBUG"
 )
 
 set(CMAKE_C_FLAGS_MINSIZEREL
-  "-Os -fno-stack-protector -fomit-frame-pointer -DNDEBUG"
+  "-Os -fstack-protector-strong -fomit-frame-pointer -DNDEBUG"
 )
 
 set(CMAKE_C_FLAGS_RELWITHDEBINFO

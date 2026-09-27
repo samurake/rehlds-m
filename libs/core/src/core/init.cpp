@@ -108,20 +108,29 @@ namespace Core {
         }
     }
 
-    void init_server_loop(const CmdLineArgs& args, const std::shared_ptr<Model::ServerLoop>& server_loop)
+    bool init_server_loop(const CmdLineArgs& args, Model::ServerLoop& server_loop)
     {
-        if (const auto target_fps = args.get_argument_option_as<int>("-targetfps").value_or(0); target_fps > 0) {
-            server_loop->set_target_fps(target_fps);
-            server_loop->set_pingboost_level(Model::PingBoostLevel::target_fps);
+        if (args.contains("targetfps")) {
+            const auto fps = args.get_argument_option_as<int>("targetfps");
+            if (!fps || *fps < 1 || *fps > Model::ServerLoop::MAX_TARGET_FPS) {
+                Util::log_error("-targetfps requires an integer between 1 and {}.", Model::ServerLoop::MAX_TARGET_FPS);
+                return false;
+            }
+            server_loop.set_target_fps(*fps);
+            server_loop.set_pingboost_level(Model::PingBoostLevel::target_fps);
         }
         else {
-            constexpr auto min_value = static_cast<int>(Model::PingBoostLevel::not_set);
-            constexpr auto max_value = static_cast<int>(Model::PingBoostLevel::level5);
-
-            auto pingboost_value = args.get_argument_option_as<int>("-pingboost").value_or(0);
-            pingboost_value = std::clamp(pingboost_value, min_value, max_value);
-
-            server_loop->set_pingboost_level(static_cast<Model::PingBoostLevel>(pingboost_value));
+            const auto pingboost = args.get_argument_option_as<int>("pingboost").value_or(0);
+            server_loop.set_pingboost_level(static_cast<Model::PingBoostLevel>(std::clamp(pingboost, 0, 5)));
         }
+        if (args.contains("framestats")) {
+            const auto seconds = args.get_argument_option_as<int>("framestats");
+            if (!seconds || *seconds < 1 || *seconds > 3600) {
+                Util::log_error("-framestats requires an interval between 1 and 3600 seconds.");
+                return false;
+            }
+            server_loop.set_metrics_interval(static_cast<unsigned>(*seconds));
+        }
+        return true;
     }
 }

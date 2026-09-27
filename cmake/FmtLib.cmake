@@ -2,7 +2,7 @@
 FetchContent_Declare(
   FmtLib
   GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-  GIT_TAG        10.0.0
+  GIT_TAG        40626af88bd7df9a5fb80be7b25ac85b122d6c21 # 11.2.0
 )
 
 set(FMT_OS ON CACHE INTERNAL

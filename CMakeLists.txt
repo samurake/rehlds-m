@@ -6,13 +6,13 @@ cmake_minimum_required(VERSION 3.21...3.29)
 
 project("ReHLDS-M"
   VERSION
-    "1.3.1"
+    "1.4.0"
 
   DESCRIPTION
     "Reverse-engineered HLDS launcher"
 
   HOMEPAGE_URL
-    "https://github.com/hun1er/rehlds-m"
+    "https://github.com/samurake/rehlds-m"
 
   LANGUAGES
     "CXX"
@@ -31,6 +31,7 @@ option(LINK_STATIC_STDCPP       "Link C++ standard library statically"          
 option(LINK_LIBCPP              "Link libc++ as the C++ standard library instead of libstdc++"        OFF)
 option(LINK_STATIC_INTEL        "Link Intel provided libraries statically"                            OFF)
 option(NO_INTEL_LIB             "Restrict linking of all Intel specific libraries"                    OFF)
+option(BUILD_BENCHMARKS          "Build the synthetic launcher frame benchmark"                       OFF)
 option(BUILD_UNIT_TESTS         "Build unit tests"                                                    OFF)
 option(CODE_COVERAGE            "Generate a coverage target using LCOV and genhtml"                   OFF)
 option(ENABLE_RTTI              "Enable support for run-time type information (RTTI)"                 OFF)
@@ -124,7 +125,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 
 # Set the C++ language standard
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 # Enforce the use of the C++ language standard
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -246,4 +247,9 @@ endif()
 
 if(ENABLE_IWYU)
   enable_iwyu(TARGETS ${PROJECT_TARGETS})
+endif()
+
+if(BUILD_BENCHMARKS)
+  add_executable(frame_benchmark tools/linux/frame-benchmark.cpp)
+  target_link_libraries(frame_benchmark PRIVATE "${LIB_MODEL}")
 endif()

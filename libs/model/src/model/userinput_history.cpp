@@ -25,20 +25,18 @@
 #include <vector>
 
 namespace {
-    /// A vector to store history lines when saving to file.
-    std::vector<std::string> history_lines{};
 
     /// Check if the input is valid.
     bool is_valid_input(const std::string_view input) noexcept
     {
-        return (!Util::str::is_empty_or_space(input)) && Util::str::is_printable(input);
+        return input.size() <= 1022 && (!Util::str::is_empty_or_space(input)) && Util::str::is_printable(input);
     }
 }
 
 namespace Model {
     UserInputHistory::UserInputHistory(const std::string_view filename) : filename_(filename)
     {
-        history_lines.reserve(HISTORY_CAPACITY);
+        history_lines_.reserve(HISTORY_CAPACITY);
     }
 
     void UserInputHistory::append(const std::string_view input)
@@ -89,7 +87,7 @@ namespace Model {
             return;
         }
 
-        if (std::string content{}; Util::try_file_read(filename_, content)) {
+        if (std::string content{}; Util::try_file_read(filename_, content, 128U * 1024U)) {
             history_.clear();
 
             for (const auto& input : Util::str::split_lines(content)) {
@@ -108,13 +106,13 @@ namespace Model {
             return;
         }
 
-        history_lines.clear();
+        history_lines_.clear();
         const auto history_size = history_.size();
 
         for (SizeType i = 0; i < history_size; ++i) {
-            history_lines.emplace_back(history_[i]);
+            history_lines_.emplace_back(history_[i]);
         }
 
-        Util::try_file_write_lines(filename_, history_lines, false);
+        Util::try_file_write_lines(filename_, history_lines_, false);
     }
 }

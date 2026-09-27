@@ -23,6 +23,8 @@ target_sources("${TARGET_NAME}"
   PRIVATE
     "${CPP_SOURCES_DIR}/circular_buffer.cpp"
     "${CPP_SOURCES_DIR}/observable.cpp"
+    "${CPP_SOURCES_DIR}/threadsafe_queue.cpp"
+    "${CPP_SOURCES_DIR}/logger.cpp"
 )
 
 #-------------------------------------------------------------------------------
@@ -39,7 +41,7 @@ target_link_libraries("${TARGET_NAME}"
 # Test Configuration
 #-------------------------------------------------------------------------------
 
-gtest_discover_tests("${TARGET_NAME}")
+gtest_discover_tests("${TARGET_NAME}" PROPERTIES TIMEOUT 10)
 
 #-------------------------------------------------------------------------------
 # Code Coverage

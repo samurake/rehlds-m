@@ -62,7 +62,7 @@ namespace View {
 
     inline int ConsoleView::print(const std::string_view text)
     {
-        fmt::print(text);
+        fmt::print("{}", text);
 
         return std::fflush(stdout);
     }

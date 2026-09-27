@@ -155,11 +155,14 @@ namespace Model {
             const auto pingboost = static_cast<int>(pingboost_level_);
             sleep_thread = get_sleep_func(pingboost);
 
-            while (serverapi_interface.run_frame()) {
+            while (!stop_requested_.load()) {
+                const auto start = FrameClock::now();
+                if (!execute_frame(serverapi_interface)) break;
                 sleep_thread();
-                process_tasks();
-                process_input(serverapi_interface);
+                finish_frame(start);
             }
+            close();
+            if (metrics_interval_) report_metrics();
         }
     }
 }

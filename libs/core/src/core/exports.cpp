@@ -32,7 +32,7 @@ namespace {
     void Exports::print(const char* const text)
     {
         if ((text != nullptr) && (*text != '\0')) {
-            Util::log_info(text);
+            Util::log_info("{}", text);
         }
     }
 }

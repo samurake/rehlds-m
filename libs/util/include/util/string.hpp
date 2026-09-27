@@ -49,7 +49,7 @@ namespace Util::str {
         T result{};
         const auto [ptr, error_code] = std::from_chars(str.data(), str.data() + str.size(), result, base);
 
-        if (error_code == std::errc()) {
+        if (error_code == std::errc() && ptr == str.data() + str.size()) {
             return result;
         }
 
@@ -83,7 +83,7 @@ namespace Util::str {
      * @return A formatted string with placeholders replaced by the given arguments.
      */
     template <typename... Args>
-    [[nodiscard]] std::string format(const std::string_view str, Args&&... args)
+    [[nodiscard]] std::string format(fmt::format_string<Args...> str, Args&&... args)
     {
         return fmt::format(str, std::forward<Args>(args)...);
     }

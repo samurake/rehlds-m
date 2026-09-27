@@ -24,10 +24,15 @@
 #include <spdlog/formatter.h>
 #include <spdlog/logger.h>
 #include <spdlog/sinks/base_sink.h>
-#include <spdlog/sinks/basic_file_sink.h>
+#include <array>
+#include <algorithm>
+#include <cerrno>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
 #include <memory>
 #include <mutex>
-#include <unordered_map>
+
 #include <vector>
 
 namespace spdlog::sinks {
@@ -37,29 +42,28 @@ namespace spdlog::sinks {
 namespace {
     Util::LogSettings logger_settings{};
     std::shared_ptr<spdlog::logger> logger{};
-    std::shared_ptr<spdlog::sinks::sink> log_sink{};
-    std::shared_ptr<spdlog::sinks::sink> file_sink{};
 
     class Formatter final : public spdlog::formatter {
       public:
         void format(const spdlog::details::log_msg& msg, spdlog::memory_buf_t& dest) override
         {
-            static const std::unordered_map<spdlog::level::level_enum, const char*> prefixes = {
-              {spdlog::level::debug,    "DEBUG"      },
-              {spdlog::level::warn,     "WARNING"    },
-              {spdlog::level::err,      "ERROR"      },
-              {spdlog::level::critical, "FATAL ERROR"}
-            };
-
-            const auto& it = prefixes.find(msg.level);
-            const auto& prefix = (it == prefixes.end()) ? "" : Util::str::format("[{}] ", it->second);
-            const auto& formatted_msg = Util::str::format("{}{}", prefix, msg.payload);
-            dest.append(formatted_msg.data(), formatted_msg.data() + formatted_msg.size());
-
-            if (msg.level != spdlog::level::info) {
-                constexpr auto* newline = "\n";
-                dest.append(newline, newline + 1);
+            std::string_view prefix;
+            switch (msg.level) {
+                case spdlog::level::debug: prefix = "[DEBUG] "; break;
+                case spdlog::level::warn: prefix = "[WARNING] "; break;
+                case spdlog::level::err: prefix = "[ERROR] "; break;
+                case spdlog::level::critical: prefix = "[FATAL ERROR] "; break;
+                default: break;
             }
+            if (!prefix.empty()) dest.append(prefix.data(), prefix.data() + prefix.size());
+            constexpr std::size_t max_message_bytes = 8192;
+            const auto length = std::min(msg.payload.size(), max_message_bytes);
+            dest.append(msg.payload.data(), msg.payload.data() + length);
+            if (msg.payload.size() > length) {
+                constexpr std::string_view suffix = " [log message truncated]\n";
+                dest.append(suffix.data(), suffix.data() + suffix.size());
+            }
+            else if (msg.level != spdlog::level::info) dest.push_back('\n');
 
 #ifdef _WIN32
             if (!prefix.empty()) {
@@ -103,7 +107,7 @@ namespace {
         {
             spdlog::memory_buf_t formatted;
             spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, formatted);
-            log_output_->write_log(fmt::to_string(formatted));
+            log_output_->write_log(std::string_view{formatted.data(), formatted.size()});
         }
 
         /**
@@ -120,6 +124,47 @@ namespace {
         ///< The LogOutput instance handling the actual logging.
         std::shared_ptr<Util::LogOutput> log_output_;
     };
+    // Optional diagnostic output must not abort the game on an I/O failure.
+    class ResilientFileSink final : public spdlog::sinks::base_sink<std::mutex> {
+      public:
+        explicit ResilientFileSink(const std::string& path)
+        {
+            file_ = std::fopen(path.c_str(), "ab");
+            if (!file_) { report_failure(); return; }
+            (void)std::setvbuf(file_, buffer_.data(), _IOFBF, buffer_.size());
+        }
+        ResilientFileSink(const ResilientFileSink&) = delete;
+        ResilientFileSink& operator=(const ResilientFileSink&) = delete;
+        ~ResilientFileSink() override { if (file_) std::fclose(file_); }
+      protected:
+        void sink_it_(const spdlog::details::log_msg& msg) override
+        {
+            if (!file_) return;
+            spdlog::memory_buf_t formatted;
+            formatter_->format(msg, formatted);
+            if (std::fwrite(formatted.data(), 1, formatted.size(), file_) != formatted.size()) {
+                disable(); return;
+            }
+            const auto now = std::chrono::steady_clock::now();
+            if (now - last_flush_ >= std::chrono::seconds{1}) { flush_(); last_flush_ = now; }
+        }
+        void flush_() override { if (file_ && std::fflush(file_) != 0) disable(); }
+      private:
+        static void report_failure()
+        {
+            std::fprintf(stderr, "[ReHLDS-M] Optional file logging disabled: %s\n", std::strerror(errno));
+        }
+        void disable()
+        {
+            report_failure();
+            auto* file = file_; file_ = nullptr;
+            if (file) std::fclose(file);
+        }
+        std::FILE* file_{};
+        std::array<char, 64 * 1024> buffer_{};
+        std::chrono::steady_clock::time_point last_flush_{};
+    };
+
 }
 
 namespace Util {
@@ -133,13 +178,11 @@ namespace Util {
         sinks.reserve(max_sinks);
 
         if ((settings.output & LogDestination::view) == LogDestination::view) {
-            log_sink = std::make_shared<LogOutputSink<std::mutex>>(settings.log_output);
-            sinks.emplace_back(log_sink);
+            sinks.emplace_back(std::make_shared<LogOutputSink<std::mutex>>(settings.log_output));
         }
 
         if ((settings.output & LogDestination::file) == LogDestination::file) {
-            file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(settings.logfile);
-            sinks.emplace_back(file_sink);
+            sinks.emplace_back(std::make_shared<ResilientFileSink>(settings.logfile));
         }
 
         logger = std::make_shared<spdlog::logger>("main", sinks.cbegin(), sinks.cend());

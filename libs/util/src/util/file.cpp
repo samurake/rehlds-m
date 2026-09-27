@@ -26,7 +26,7 @@
 
 namespace {
     /** @brief 100 MB in bytes */
-    constexpr auto MAX_FILE_SIZE = static_cast<std::streamoff>(100 * 1024 * 1024);
+
 
     bool handle_write_error(const Util::FileWriteErrorCode error_code, const std::string& path) noexcept
     {
@@ -54,7 +54,7 @@ namespace {
 }
 
 namespace Util {
-    FileReadErrorCode file_read(const std::string& path, std::string& content) noexcept
+    FileReadErrorCode file_read(const std::string& path, std::string& content, std::size_t max_bytes) noexcept
     {
         if (!file_exists(path)) {
             return FileReadErrorCode::not_exist;
@@ -73,7 +73,7 @@ namespace Util {
             return FileReadErrorCode::size_invalid;
         }
 
-        if (file_size > MAX_FILE_SIZE) {
+        if (static_cast<std::uintmax_t>(file_size) > max_bytes) {
             return FileReadErrorCode::size_exceeded;
         }
 
@@ -144,9 +144,9 @@ namespace Util {
         return error_code;
     }
 
-    bool try_file_read(const std::string& path, std::string& content) noexcept
+    bool try_file_read(const std::string& path, std::string& content, std::size_t max_bytes) noexcept
     {
-        switch (file_read(path, content)) {
+        switch (file_read(path, content, max_bytes)) {
             case FileReadErrorCode::success: {
                 return true;
             }

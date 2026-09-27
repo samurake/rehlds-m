@@ -11,6 +11,33 @@ project("HLDS Launcher")
 set(TARGET_NAME "hlds")
 add_executable("${TARGET_NAME}")
 
+# Keep the launcher identity available without loading the engine or game files.
+find_package(Git QUIET)
+set(REHLDSM_REVISION "unknown")
+if(GIT_FOUND)
+  execute_process(COMMAND "${GIT_EXECUTABLE}" -c "safe.directory=${CMAKE_SOURCE_DIR}"
+    rev-parse --short=12 HEAD WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE revision OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(revision MATCHES "^[0-9a-f]+$")
+    set(REHLDSM_REVISION "${revision}")
+    execute_process(COMMAND "${GIT_EXECUTABLE}" -c "safe.directory=${CMAKE_SOURCE_DIR}"
+      diff --quiet HEAD WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      RESULT_VARIABLE source_dirty ERROR_QUIET)
+    if(source_dirty)
+      string(APPEND REHLDSM_REVISION "-dirty")
+    endif()
+  endif()
+endif()
+target_compile_definitions("${TARGET_NAME}" PRIVATE
+  REHLDSM_VERSION="${CMAKE_PROJECT_VERSION}"
+  REHLDSM_REVISION="${REHLDSM_REVISION}"
+)
+if(BUILD_UNIT_TESTS)
+  add_test(NAME launcher_version COMMAND "$<TARGET_FILE:${TARGET_NAME}>" --version)
+  set_tests_properties(launcher_version PROPERTIES TIMEOUT 10
+    PASS_REGULAR_EXPRESSION "ReHLDS-M ${CMAKE_PROJECT_VERSION} [(]")
+endif()
+
 #-------------------------------------------------------------------------------
 # Source Files
 #-------------------------------------------------------------------------------
@@ -87,16 +114,9 @@ target_link_libraries("${TARGET_NAME}"
 #-------------------------------------------------------------------------------
 
 if(UNIX AND NOT APPLE)
-  foreach(lib IN ITEMS libgcc_s.so libstdc++.so libsvml.so libintlc.so)
-    if((lib STREQUAL "libgcc_s.so" AND NOT LINK_STATIC_GCC) OR
-        (lib STREQUAL "libstdc++.so" AND NOT LINK_STATIC_STDCPP) OR
-        (lib MATCHES "libsvml.so|libintlc.so" AND NOT NO_INTEL_LIB AND NOT LINK_STATIC_INTEL))
-      add_custom_command(
-        TARGET "${TARGET_NAME}" POST_BUILD
-        WORKING_DIRECTORY "$<TARGET_FILE_DIR:${TARGET_NAME}>"
-        COMMAND sh -c "cp \$(ldd '${TARGET_NAME}${SUFFIX_NAME}' | grep '${lib}' | grep -E -o '/.+\\s') . > /dev/null 2>&1 || (exit 0)"
-        VERBATIM
-      )
-    endif()
-  endforeach()
+  add_custom_command(TARGET "${TARGET_NAME}" POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" "-DEXECUTABLE=$<TARGET_FILE:${TARGET_NAME}>"
+      -P "${CMAKE_SOURCE_DIR}/cmake/CopyRuntime.cmake"
+    VERBATIM
+  )
 endif()

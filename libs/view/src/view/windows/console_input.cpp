@@ -27,13 +27,13 @@
 #include <Windows.h>
 
 namespace {
-    bool has_input(void* const stdin_handle, ::INPUT_RECORD& input_record) noexcept
+    int has_input(void* const stdin_handle, ::INPUT_RECORD& input_record) noexcept
     {
         auto num_events_read = DWORD{0};
 
         if (FALSE == ::PeekConsoleInput(stdin_handle, &input_record, 1, &num_events_read)) {
             Util::log_error("Failed to peek console input: {}", Util::get_last_error_string());
-            return false;
+            return -1;
         }
 
         return num_events_read > 0;
@@ -57,17 +57,17 @@ namespace {
 }
 
 namespace View {
-    void ConsoleInput::read_input()
+    void ConsoleInput::read_input(std::stop_token stop)
     {
         ::INPUT_RECORD input_record{};
         auto* const stdin_handle = Util::get_stdin_handle_or_abort();
         constexpr auto sleep_time = std::chrono::milliseconds{25};
 
-        while (running_) {
-            if ((!has_input(stdin_handle, input_record)) || (!read_console_input(stdin_handle, input_record))) {
-                std::this_thread::sleep_for(sleep_time);
-                continue;
-            }
+        while (!stop.stop_requested()) {
+            const int ready = has_input(stdin_handle, input_record);
+            if (ready < 0) break;
+            if (ready == 0) { std::this_thread::sleep_for(sleep_time); continue; }
+            if (!read_console_input(stdin_handle, input_record)) break;
 
             if (!is_key_event(input_record)) {
                 continue;

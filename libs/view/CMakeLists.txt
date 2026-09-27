@@ -68,3 +68,7 @@ target_link_libraries("${TARGET_NAME}"
     "${LIB_PRESENTER}"
     "${LIB_UTIL}"
 )
+
+if(BUILD_UNIT_TESTS AND UNIX AND NOT APPLE)
+  add_subdirectory(tests)
+endif()

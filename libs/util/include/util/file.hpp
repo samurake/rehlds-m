@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -58,7 +59,7 @@ namespace Util {
      *
      * @return A \c FileReadErrorCode indicating the result of the operation.
      */
-    FileReadErrorCode file_read(const std::string& path, std::string& content) noexcept;
+    FileReadErrorCode file_read(const std::string& path, std::string& content, std::size_t max_bytes = 100U * 1024U * 1024U) noexcept;
 
     /**
      * @brief Writes a string to a file, overwriting its existing content.
@@ -102,7 +103,7 @@ namespace Util {
      *
      * @return \c true if the operation was successful, \c false otherwise.
      */
-    bool try_file_read(const std::string& path, std::string& content) noexcept;
+    bool try_file_read(const std::string& path, std::string& content, std::size_t max_bytes = 100U * 1024U * 1024U) noexcept;
 
     /**
      * @brief Writes content to a file, overwriting its existing content and logs any errors.

@@ -19,6 +19,7 @@
  */
 
 #include "common/engine/engine_wrapper.hpp"
+#include "common/engine/interface/dedicated_serverapi_interface.hpp"
 #include "core/cmdline_args.hpp"
 #include "core/cmdline_processor.hpp"
 #include "core/init.hpp"
@@ -29,40 +30,67 @@
 #include "presenter/output_presenter.hpp"
 #include "view/console_input.hpp"
 #include "view/console_view.hpp"
+#include "util/logger.hpp"
+#include <cstdio>
 #include <memory>
+#include <string_view>
 
 namespace {
-    int run_server_loop(const Core::CmdLineArgs& cmdline_args, const std::shared_ptr<View::BaseView>& view)
+    // Engine ABI ownership remains unchanged; this guard controls shutdown order.
+    class EngineSession final {
+      public:
+        explicit EngineSession(Common::DedicatedServerApiInterface& api) : api_(api) {}
+        ~EngineSession() { api_.shutdown(); }
+      private:
+        Common::DedicatedServerApiInterface& api_;
+    };
+    class Runtime final {
+      public:
+        Runtime(Common::DedicatedServerApiInterface& api, Common::SystemInterface* system, View::BaseView& view)
+          : engine_(api), commands_(system), history_("input_history.txt"),
+            input_presenter_(loop_, history_), output_presenter_(loop_, view), input_(input_presenter_) {}
+        ~Runtime()
+        {
+            loop_.close();
+            input_.stop();
+            // Members die in reverse order; EngineSession shuts down last.
+        }
+        int run(const Core::CmdLineArgs& args, Common::DedicatedServerApiInterface& api)
+        {
+            if (!Core::init_server_loop(args, loop_)) return 2;
+            loop_.set_console_commands(commands_);
+            loop_.run(api);
+            return 0;
+        }
+      private:
+        EngineSession engine_;
+        Model::ServerLoop loop_{};
+        Model::ConsoleCommands commands_;
+        Model::UserInputHistory history_;
+        Presenter::InputPresenter input_presenter_;
+        Presenter::OutputPresenter output_presenter_;
+        View::ConsoleInput input_;
+    };
+    int run_server_loop(const Core::CmdLineArgs& args, View::BaseView& view)
     {
         auto& engine = Common::EngineWrapper::get_instance();
-        auto* system_interface = engine.get_interface_system();
-        auto& serverapi_interface = *engine.get_interface_or_abort<Common::EngineInterface::server_api>();
-
-        const auto server_loop = std::make_shared<Model::ServerLoop>();
-        Core::init_server_loop(cmdline_args, server_loop);
-
-        const auto console_commands = std::make_shared<Model::ConsoleCommands>(system_interface);
-        const auto input_history = std::make_shared<Model::UserInputHistory>("input_history.txt");
-
-        const auto input_presenter =
-          std::make_shared<Presenter::InputPresenter>(server_loop, input_history, console_commands);
-
-        const auto output_presenter = std::make_unique<Presenter::OutputPresenter>(server_loop, view);
-        const auto console_input = std::make_unique<View::ConsoleInput>(input_presenter);
-
-        server_loop->run(serverapi_interface);
-        serverapi_interface.shutdown();
-
-        return 0;
+        auto& api = *engine.get_interface_or_abort<Common::EngineInterface::server_api>();
+        const auto runtime = std::make_unique<Runtime>(api, engine.get_interface_system(), view);
+        return runtime->run(args, api);
     }
 }
 
 int main(const int argc, const char** const argv)
 {
+    if (argc == 2 && std::string_view{argv[1]} == "--version") {
+        std::printf("ReHLDS-M %s (%s)\n", REHLDSM_VERSION, REHLDSM_REVISION);
+        return 0;
+    }
     auto cmdline_args = Core::CmdLineArgs::from_command_line(argc, argv);
     const auto console_view = std::make_shared<View::ConsoleView>();
 
     Core::init_logger(cmdline_args, console_view);
+    Util::log_info("ReHLDS-M {} ({})\n", REHLDSM_VERSION, REHLDSM_REVISION);
     const Core::CmdLineProcessor cmdline_processor{};
     cmdline_processor.process(cmdline_args);
 
@@ -71,5 +99,5 @@ int main(const int argc, const char** const argv)
     Core::init_filesystem();
     Core::init_engine(cmdline_args);
 
-    return run_server_loop(cmdline_args, console_view);
+    return run_server_loop(cmdline_args, *console_view);
 }

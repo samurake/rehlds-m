@@ -2,7 +2,7 @@
 FetchContent_Declare(
   StringPy
   GIT_REPOSITORY https://github.com/hun1er/stringpy.git
-  GIT_TAG        v1.0.2
+  GIT_TAG        b2c1aa10e6c4e1553823930f562d19aa08b88713 # v1.0.2
 )
 
 set(STRINGPY_INSTALL OFF CACHE INTERNAL
