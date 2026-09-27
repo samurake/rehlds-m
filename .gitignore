@@ -509,3 +509,9 @@ out/
 # Miscellaneous
 .idea/
 *.snalyzerinfo
+
+# Release tooling and notes are source, not generated build directories.
+!tools/release/
+!tools/release/**
+!docs/releases/
+!docs/releases/*.md
