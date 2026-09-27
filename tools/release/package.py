@@ -129,15 +129,16 @@ def package(args):
                     repository="https://github.com/samurake/rehlds-m",
                     source_url=f"https://github.com/samurake/rehlds-m/tree/{info['revision']}")
         (staging / "build-info.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+        installation = ((ROOT / "tools/release/INSTALL-linux.md").read_text(encoding="utf-8")
+                        if args.platform == "linux-i386" else
+                        "Windows installation: stop the server, back up the existing launcher and CRT DLLs,\n"
+                        "then copy hlds.exe and every included x86 CRT DLL into the server root together.\n"
+                        "Windows supplies the Universal CRT. Start the server through its normal entry.\n")
         (staging / "README.txt").write_text(
             f"ReHLDS-M {label} - {args.platform}\n\n"
             f"Source: {info['source_url']}\nRequired: {runtime_requirement}\n"
             "CPU: SSE4.2. Launcher only; engine, game DLL and plugins are supplied separately.\n"
-            "Back up the existing launcher and runtimes before replacement.\n"
-            "Linux: extract the tar.gz in the server root; retain executable permissions.\n"
-            "Linux: run sh ./check-host.sh before installation. Host supplies 32-bit glibc >= 2.34 and its loader.\n"
-            "Do not copy libc.so.6 or a replacement loader into the server directory.\n"
-            "Windows: keep the included x86 CRT DLLs beside hlds.exe; Windows supplies the Universal CRT.\n"
+            f"\n{installation}\n"
             "Use --version to identify this launcher without loading the engine.\n"
             "Candidate builds have not been qualified with real player load on the hosting provider.\n",
             encoding="utf-8")

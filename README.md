@@ -34,17 +34,22 @@ Rehlds-m is a modern, cross-platform launcher for the Half-Life Dedicated Server
 
 - **Operating System:**
   - Windows x86. This checkout is built and tested with Visual Studio 2022; older Windows releases need separate runtime qualification.
-  - Linux i386 with the runtime symbols listed in the build's `artifact-manifest.json`. The current AlmaLinux builder produces a package requiring symbols through GLIBC_2.35; do not infer compatibility from the distribution name alone.
+  - Linux i386 with 32-bit glibc >= 2.34 and `/lib/ld-linux.so.2`. Release packages enforce a GLIBC_2.34 symbol ceiling; exact dependencies are listed in `artifact-manifest.json`.
 - **CPU:** A modern processor with support for the **SSE4.2** instruction set.
-- **Dependencies (Windows):** [Microsoft Visual C++ Redistributable 2015-2022 (x86)](https://aka.ms/vs/17/release/vc_redist.x86.exe) must be installed.
+- **Dependencies (Windows):** The x86 Visual C++ Release CRT DLLs are included. Windows 10/Server 2016 or later supplies the Universal CRT and system DLLs.
 
 ## Installation
 
-1.  **Backup:** Make a backup of your original server executable (e.g., `hlds.exe` on Windows, or `hlds_linux`/`hlds_run` on Linux).
-2.  **Replace:** Copy all files from the release archive into your server's root directory.
-    -   For **Windows**, this includes `hlds.exe`.
-    -   For **Linux**, this includes `hlds_linux` and several library files (`lib*.so`). Ensure the main executable has execute permissions (`chmod +x hlds_linux`).
-3.  **Launch:** Start your server using the new executable as you normally would, with any desired command-line parameters.
+For **Linux**, follow the [exact file table and installation steps](tools/release/INSTALL-linux.md).
+Only `hlds_linux`, `libstdc++.so.6`, and `libgcc_s.so.1` go into the server root,
+beside `hlds_run` and `cstrike/`. Run the host check from the complete extracted
+package first, then stop the server and back up the target files before replacing
+them. `hlds_linux` must retain execute permission. Start the server normally after
+replacement; a map change alone does not load a new launcher.
+
+For **Windows**, stop the server, back up the existing launcher and runtime DLLs,
+and copy `hlds.exe` plus the included CRT DLLs together into the server root.
+Start through the normal hosting-panel entry after replacement.
 
 ## Command-Line Parameters
 

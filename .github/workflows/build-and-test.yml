@@ -165,6 +165,8 @@ jobs:
           (cd dist && sha256sum --check --strict *.sha256)
           {
             printf '# ReHLDS-M %s\n\n' "$RELEASE_TAG"
+            cat tools/release/INSTALL-linux.md
+            printf '\n'
             cat "docs/releases/${RELEASE_VERSION}.md"
             printf '\nSource commit: `%s`\n' "$GITHUB_SHA"
           } > release-notes.md
