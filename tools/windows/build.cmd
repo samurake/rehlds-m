@@ -13,5 +13,7 @@ cmake -S . -B out/windows-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_UNIT
 if errorlevel 1 exit /b 1
 cmake --build out/windows-build --parallel %BUILD_JOBS%
 if errorlevel 1 exit /b 1
+python tools/windows/runtime.py
+if errorlevel 1 exit /b 1
 ctest --test-dir out/windows-build --output-on-failure --parallel %BUILD_JOBS% --output-junit "%CD%\out\ci\tests.xml"
 exit /b %errorlevel%

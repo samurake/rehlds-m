@@ -1,4 +1,4 @@
-"""Validate build identity and create self-contained launcher release archives."""
+"""Validate build identity and package launcher runtimes; system libraries stay on the host."""
 import argparse
 import hashlib
 import json
@@ -62,12 +62,19 @@ def package(args):
         if data[:5] != b"\x7fELF\x01" or struct.unpack_from("<H", data, 18)[0] != 3:
             raise ValueError("Expected an i386 ELF launcher")
         manifest = json.loads((source / "artifact-manifest.json").read_text())
+        if manifest.get("diagnostic") or manifest.get("max_allowed_glibc") != "2.34":
+            raise ValueError("Release requires the non-sanitized GLIBC_2.34 compatibility gate")
+        if {r["file"] for r in manifest["files"]} != {"hlds_linux", "libstdc++.so.6", "libgcc_s.so.1"}:
+            raise ValueError("Incomplete Linux runtime manifest")
         for record in manifest["files"]:
             if record["file"] not in ("hlds_linux", "libstdc++.so.6", "libgcc_s.so.1"):
                 raise ValueError("Unexpected runtime in the Linux manifest")
             if digest(source / record["file"]) != record["sha256"]:
                 raise ValueError(f"Runtime hash mismatch: {record['file']}")
-        required = ["hlds_linux", "libstdc++.so.6", "libgcc_s.so.1", "artifact-manifest.json"]
+            if tuple(map(int, record["max_glibc"].split("."))) > (2, 34):
+                raise ValueError("Release runtime exceeds the GLIBC_2.34 floor")
+        required = ["hlds_linux", "libstdc++.so.6", "libgcc_s.so.1", "artifact-manifest.json",
+                    "libgcc-package.txt", "libstdcpp-package.txt"]
         runtime_requirement = "GLIBC symbols through " + max(
             (r["max_glibc"] for r in manifest["files"]),
             key=lambda v: tuple(map(int, v.split("."))))
@@ -75,8 +82,17 @@ def package(args):
         pe = struct.unpack_from("<I", data, 0x3C)[0]
         if data[:2] != b"MZ" or data[pe:pe + 4] != b"PE\0\0" or struct.unpack_from("<H", data, pe + 4)[0] != 0x14C:
             raise ValueError("Expected an x86 PE launcher")
-        required = ["hlds.exe"]
-        runtime_requirement = "Microsoft Visual C++ 2015-2022 Redistributable (x86)"
+        manifest = json.loads((source / "artifact-manifest.json").read_text())
+        required = [record["file"] for record in manifest["files"]]
+        if "hlds.exe" not in required or "vcruntime140.dll" not in required or "msvcp140.dll" not in required:
+            raise ValueError("Missing Windows CRT manifest entries")
+        for record in manifest["files"]:
+            if Path(record["file"]).name != record["file"] or not record["file"].endswith((".dll", ".exe")):
+                raise ValueError("Unexpected Windows runtime filename")
+            if digest(source / record["file"]) != record["sha256"]:
+                raise ValueError(f"Runtime hash mismatch: {record['file']}")
+        required += ["artifact-manifest.json", "MSVC-REDIST.txt"]
+        runtime_requirement = "Windows 10/Server 2016 or later with Universal CRT; x86 VC++ runtime DLLs included"
     banner = subprocess.check_output([str(executable), "--version"], text=True).strip()
     expected = f"ReHLDS-M {info['version']} ({info['revision'][:12]}{'-dirty' if dirty else ''})"
     if banner != expected:
@@ -99,12 +115,15 @@ def package(args):
                 if license_file.is_file():
                     shutil.copy2(license_file, licenses / f"{dependency}-{license_file.name}")
         if args.platform == "linux-i386":
-            runtime_licenses = sorted(Path("/usr/share/licenses/libgcc").glob("*"))
-            if not runtime_licenses:
-                raise ValueError("Missing GCC runtime license notices")
-            for license_file in runtime_licenses:
-                if license_file.is_file():
-                    shutil.copy2(license_file, licenses / f"gcc-runtime-{license_file.name}")
+            shutil.copy2(ROOT / "tools/linux/check-host.sh", staging / "check-host.sh")
+            for prefix, directory in (("libstdcpp", Path("/usr/share/licenses/libgcc")),
+                                      ("libgcc", Path("/opt/rehldsm-runtime/licenses"))):
+                runtime_licenses = sorted(directory.glob("*"))
+                if not runtime_licenses:
+                    raise ValueError(f"Missing {prefix} runtime license notices")
+                for license_file in runtime_licenses:
+                    if license_file.is_file():
+                        shutil.copy2(license_file, licenses / f"{prefix}-{license_file.name}")
         info.update(platform=args.platform, label=label, binary_banner=banner,
                     dirty=dirty, runtime_requirement=runtime_requirement,
                     repository="https://github.com/samurake/rehlds-m",
@@ -116,8 +135,9 @@ def package(args):
             "CPU: SSE4.2. Launcher only; engine, game DLL and plugins are supplied separately.\n"
             "Back up the existing launcher and runtimes before replacement.\n"
             "Linux: extract the tar.gz in the server root; retain executable permissions.\n"
-            "Confirm runtime symbols on the host before using a Linux package.\n"
-            "Windows: install the x86 VC++ runtime before starting hlds.exe.\n"
+            "Linux: run sh ./check-host.sh before installation. Host supplies 32-bit glibc >= 2.34 and its loader.\n"
+            "Do not copy libc.so.6 or a replacement loader into the server directory.\n"
+            "Windows: keep the included x86 CRT DLLs beside hlds.exe; Windows supplies the Universal CRT.\n"
             "Use --version to identify this launcher without loading the engine.\n"
             "Candidate builds have not been qualified with real player load on the hosting provider.\n",
             encoding="utf-8")
@@ -126,6 +146,7 @@ def package(args):
             "".join(f"{sha}  {name}\n" for name, sha in checksums), encoding="utf-8")
         if args.platform == "linux-i386":
             (staging / "hlds_linux").chmod(0o755)
+            (staging / "check-host.sh").chmod(0o755)
             archive = args.output / f"{name}.tar.gz"
             with tarfile.open(archive, "w:gz") as tar:
                 for path in sorted(staging.iterdir()):

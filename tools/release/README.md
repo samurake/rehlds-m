@@ -37,6 +37,14 @@ publication flow to avoid conflicting version selection.
 `package.py` checks executable architecture, source version/revision, tracked
 source cleanliness, Linux runtime hashes and the standalone version output.
 It packages only explicitly selected runtime files, manifests and notices.
+Linux archives contain both C++ runtime libraries with RPM provenance and enforce
+GLIBC_2.34 as the maximum imported symbol version. An extracted-archive test on
+unbackported glibc 2.34 is required before publication. `check-host.sh` provides a
+read-only host preflight. System glibc and its loader remain provider-managed.
+Windows archives contain the unmodified x86 Release CRT DLLs from the installed
+Visual Studio redistribution directory, its redistribution notice and a dependency
+manifest. Unexpected non-system DLL dependencies fail the build. Windows itself
+supplies system DLLs and the Universal CRT (Windows 10/Server 2016 or later).
 `--allow-dirty` exists solely for local packaging validation and is never passed
 by CI. Release/source information and dependency licenses accompany both archives.
 

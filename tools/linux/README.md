@@ -39,14 +39,21 @@ The output is for **32-bit Linux**, with the project's existing SSE4.2 CPU
 requirement. It uses C++20, Release, LTO, stack protection, and `OPTIMIZE_FOR_CURRENT_CPU=OFF`.
 It does not bundle an engine, game DLL, AMXX, glibc, or loader.
 
-**Check the artifact manifest before deployment.** AlmaLinux 9's glibc reports
-2.34 but includes backported symbol versions. On 2026-09-27 the built launcher
-and libstdc++ required at most GLIBC_2.34, while its copied libgcc required
-`_dl_find_object@GLIBC_2.35`. A plain glibc 2.34 installation therefore cannot be
-assumed compatible with the whole directory. The launcher also requires
-GLIBCXX_3.4.29, provided by the packaged libstdc++.
+Every release enforces a **GLIBC_2.34** symbol ceiling for the launcher,
+`libstdc++.so.6`, and `libgcc_s.so.1`. The host supplies 32-bit glibc and
+`/lib/ld-linux.so.2`; these must stay managed together by the hosting provider.
+`GLIBC_2.35` names a symbol version, not a separately downloadable `.so` file.
 
-An optional strict deployment gate can reject newer glibc symbol requirements:
+RC1's AlmaLinux 9 libgcc imported `_dl_find_object@GLIBC_2.35`, even though that
+distribution labels its backported glibc 2.34. The builder now uses the maintained
+AlmaLinux 8 i686 libgcc ABI, retaining GCC 11's compiler and libstdc++ (which supplies
+GLIBCXX_3.4.29). Both inspected unwinders export the same 141 versioned symbols.
+The selected runtime is used for the regression/sanitizer tests as well as the
+release. RPM version and source package names are included alongside its licenses.
+No library binaries or symbol versions are patched. Repositories remain updateable;
+future incompatible changes fail the dependency and baseline test gates.
+
+The strict deployment gate is enabled by default (and can be lowered explicitly):
 
 ```powershell
 docker run --rm --network none `
@@ -56,8 +63,19 @@ docker run --rm --network none `
   /output/linux-i386 --max-glibc 2.34
 ```
 
-Successful verification writes manifests. `verify.py` without `--max-glibc` records the
-actual requirements and checks i386 files and local runtime resolution.
+Successful verification writes manifests. It rejects missing non-system libraries,
+unresolved relocations, wrong architectures and newer glibc requirements. Sanitizer
+builds explicitly allow diagnostic runtimes and cannot be packaged for release.
+
+CI extracts the actual release archive in the pinned `compat.Dockerfile` environment,
+checks that its libc lacks GLIBC_2.35, runs the host preflight, and reruns the release
+regression suite with immediate symbol binding and the packaged runtimes. This frozen
+OS is only a test fixture, never a shipped dependency or a production OS recommendation.
+
+On the host, extract the package into a staging directory and run `sh ./check-host.sh`.
+This checks hashes, executable permissions, the 32-bit loader and launcher dependency
+resolution without starting the game engine. A passing result does not qualify
+separately loaded engines/plugins or real-player performance.
 
 The September audit artifacts are under `out/linux-review-20260927/`. They are
 local investigation builds, with the original runtime defects still present.
