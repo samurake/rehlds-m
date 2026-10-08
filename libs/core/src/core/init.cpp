@@ -23,6 +23,7 @@
 #include "common/filesystem/filesystem_wrapper.hpp"
 #include "util/lifecycle.hpp"
 #include "util/logger.hpp"
+#include "util/runtime_limits.hpp"
 #include <algorithm>
 #include <clocale>
 
@@ -33,17 +34,27 @@
 #endif
 
 namespace Core {
-    void init_logger(const CmdLineArgs& args, const std::shared_ptr<Util::LogOutput>& log_output)
+    void init_logger(
+      const CmdLineArgs& args, const std::shared_ptr<Util::LogOutput>& log_output, const StartupSettings& startup)
     {
         constexpr auto* logfile = "qconsole.log";
         const auto enable_condebug = args.contains("-condebug");
 
-#ifdef _WIN32
-        Util::log_init(enable_condebug, logfile, log_output);
-#else
-        const auto game_name = args.get_argument_option("-game").value_or(std::string{});
-        Util::log_init(enable_condebug, game_name.empty() ? logfile : (game_name + "/" + logfile), log_output);
+        Util::LogSettings settings;
+        settings.log_output = log_output;
+        settings.asynchronous = startup.async_output;
+        settings.queue_capacity = startup.output_queue_capacity;
+        settings.flush_interval_ms = startup.output_flush_ms;
+        if (enable_condebug) {
+            settings.output = Util::LogDestination::view_and_file;
+            settings.logfile = logfile;
+#ifndef _WIN32
+            const auto game_name = args.get_argument_option("-game").value_or(std::string{});
+            if (!game_name.empty())
+                settings.logfile = game_name + "/" + logfile;
 #endif
+        }
+        Util::log_init(settings);
     }
 
     void init_locale()
@@ -108,29 +119,26 @@ namespace Core {
         }
     }
 
-    bool init_server_loop(const CmdLineArgs& args, Model::ServerLoop& server_loop)
+    bool init_server_loop(const CmdLineArgs& args, const StartupSettings& settings, Model::ServerLoop& server_loop)
     {
-        if (args.contains("targetfps")) {
-            const auto fps = args.get_argument_option_as<int>("targetfps");
-            if (!fps || *fps < 1 || *fps > Model::ServerLoop::MAX_TARGET_FPS) {
-                Util::log_error("-targetfps requires an integer between 1 and {}.", Model::ServerLoop::MAX_TARGET_FPS);
-                return false;
-            }
-            server_loop.set_target_fps(*fps);
+        if (settings.target_fps < 0 || settings.target_fps > Model::ServerLoop::MAX_TARGET_FPS) {
+            Util::log_error("target_fps in rehldsm.cfg must be between 0 and {}.", Model::ServerLoop::MAX_TARGET_FPS);
+            return false;
+        }
+        if (settings.target_fps) {
+            server_loop.set_target_fps(settings.target_fps);
             server_loop.set_pingboost_level(Model::PingBoostLevel::target_fps);
         }
         else {
             const auto pingboost = args.get_argument_option_as<int>("pingboost").value_or(0);
             server_loop.set_pingboost_level(static_cast<Model::PingBoostLevel>(std::clamp(pingboost, 0, 5)));
         }
-        if (args.contains("framestats")) {
-            const auto seconds = args.get_argument_option_as<int>("framestats");
-            if (!seconds || *seconds < 1 || *seconds > 3600) {
-                Util::log_error("-framestats requires an interval between 1 and 3600 seconds.");
-                return false;
-            }
-            server_loop.set_metrics_interval(static_cast<unsigned>(*seconds));
+        if (settings.frame_stats_seconds > Util::RuntimeLimits::max_frame_stats_seconds) {
+            Util::log_error(
+              "frame_stats_seconds must be between 0 and {}.", Util::RuntimeLimits::max_frame_stats_seconds);
+            return false;
         }
+        server_loop.set_metrics_interval(settings.frame_stats_seconds);
         return true;
     }
 }

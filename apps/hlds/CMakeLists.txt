@@ -113,6 +113,13 @@ target_link_libraries("${TARGET_NAME}"
 # Post-Build Actions
 #-------------------------------------------------------------------------------
 
+# Include a documented startup configuration in build/package artifacts.
+add_custom_command(TARGET "${TARGET_NAME}" POST_BUILD
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/data/rehldsm.cfg" "$<TARGET_FILE_DIR:${TARGET_NAME}>/rehldsm.cfg"
+  VERBATIM
+)
+
 if(UNIX AND NOT APPLE)
   add_custom_command(TARGET "${TARGET_NAME}" POST_BUILD
     COMMAND "${CMAKE_COMMAND}" "-DEXECUTABLE=$<TARGET_FILE:${TARGET_NAME}>"

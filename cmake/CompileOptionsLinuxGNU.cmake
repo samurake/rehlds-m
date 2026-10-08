@@ -54,7 +54,7 @@ if(USE_LINKER_GOLD)
     $<$<NOT:$<BOOL:${ENABLE_ASAN}>>:-Wl,--detect-odr-violations>
 
     # Do not generate unwind information for Release or MinSizeRel builds
-    $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:-Wl,--no-ld-generated-unwind-info>
+    $<$<AND:$<NOT:$<BOOL:${ENABLE_EXCEPTIONS}>>,$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>>:-Wl,--no-ld-generated-unwind-info>
   )
 endif()
 

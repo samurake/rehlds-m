@@ -92,5 +92,12 @@ namespace Util {
          * @param message The formatted log message to be written.
          */
         virtual void write_log(std::string_view message) = 0;
+
+        // Called only by the output worker. Default supports existing/custom views.
+        virtual bool try_write_log(std::string_view message)
+        {
+            write_log(message);
+            return true;
+        }
     };
 }

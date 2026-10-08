@@ -19,6 +19,7 @@
  */
 
 #include "model/userinput_history.hpp"
+#include "util/system.hpp"
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <fstream>
@@ -37,7 +38,12 @@ namespace {
             std::filesystem::remove(temp_file);
         }
 
-        std::filesystem::path temp_file{std::filesystem::temp_directory_path() / "test_history.txt"};
+        // CTest runs individual cases in parallel processes; their files must not
+        // be removed/truncated by another case's setup or teardown.
+        std::filesystem::path temp_file{
+          std::filesystem::temp_directory_path() /
+          (std::string{"rehldsm-history-"} + std::to_string(Util::get_process_id()) + "-" +
+           testing::UnitTest::GetInstance()->current_test_info()->name() + ".txt")};
         Model::UserInputHistory history{temp_file.string()};
     };
 

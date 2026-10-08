@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "util/async_log_sink.hpp"
 #include "util/log_output.hpp"
 #include <spdlog/common.h>
 #include <spdlog/spdlog.h>
@@ -124,6 +125,9 @@ namespace Util {
          * @brief A shared pointer to the object to be used for displaying log messages when view output is enabled.
          */
         std::shared_ptr<LogOutput> log_output{};
+        bool asynchronous{};
+        unsigned queue_capacity{1024};
+        unsigned flush_interval_ms{100};
     };
 
     /**
@@ -149,6 +153,9 @@ namespace Util {
      * @return A constant reference to the LogSettings object.
      */
     [[nodiscard]] const LogSettings& log_settings();
+    [[nodiscard]] OutputStats log_output_stats();
+    bool log_flush(std::chrono::milliseconds timeout = std::chrono::milliseconds{100});
+    bool log_shutdown(std::chrono::milliseconds timeout = std::chrono::milliseconds{1000});
 
     /**
      * @brief Logs a message with info level.
@@ -218,6 +225,8 @@ namespace Util {
     void log_critical(fmt::format_string<Args...> str, Args&&... args)
     {
         spdlog::critical(str, std::forward<Args>(args)...);
+        // Fatal callers may immediately abort; normal logging never waits for I/O.
+        (void)log_flush();
     }
 }
 

@@ -49,6 +49,15 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def validate_build_inputs(source):
+    """Require the portable build policy and the cfg copied by that build."""
+    provenance = json.loads((source / "build-provenance.json").read_text(encoding="utf-8"))
+    if provenance.get("cpu_baseline") != "i386 / SSE4.2; no march=native" or provenance.get("exceptions") is not True:
+        raise ValueError("Release requires the portable CPU baseline and worker exception support")
+    if (source / "rehldsm.cfg").read_bytes() != (ROOT / "data/rehldsm.cfg").read_bytes():
+        raise ValueError("Built configuration differs from source; rebuild before packaging")
+
+
 def package(args):
     info = identity(args.label)
     label = info["label"]
@@ -56,6 +65,7 @@ def package(args):
     if dirty and not args.allow_dirty:
         raise ValueError("Refusing to release a build from modified tracked source")
     source = args.input.resolve()
+    validate_build_inputs(source)
     executable = source / ("hlds_linux" if args.platform == "linux-i386" else "hlds.exe")
     data = executable.read_bytes()
     if args.platform == "linux-i386":
@@ -104,7 +114,9 @@ def package(args):
         staging.mkdir()
         for filename in required:
             shutil.copy2(source / filename, staging / filename)
+        shutil.copy2(source / "build-provenance.json", staging / "build-provenance.json")
         shutil.copy2(ROOT / "LICENSE", staging / "LICENSE")
+        shutil.copy2(source / "rehldsm.cfg", staging / "rehldsm.cfg")
         licenses = staging / "licenses"
         licenses.mkdir()
         for dependency in ("fmtlib", "spdlog", "stringpy"):
@@ -124,23 +136,27 @@ def package(args):
                 for license_file in runtime_licenses:
                     if license_file.is_file():
                         shutil.copy2(license_file, licenses / f"{prefix}-{license_file.name}")
+            provenance = source / "build-provenance.json"
+            if provenance.is_file() and "gcc-toolset-15" in json.loads(provenance.read_text())["compiler_path"]:
+                notices = sorted(Path("/opt/rh/gcc-toolset-15/root/usr/share/doc/gcc-toolset-15-gcc").glob("COPYING*"))
+                if not notices:
+                    raise ValueError("Missing GCC Toolset 15 nonshared runtime license notices")
+                for notice in notices:
+                    shutil.copy2(notice, licenses / f"gcc-toolset-15-{notice.name}")
         info.update(platform=args.platform, label=label, binary_banner=banner,
                     dirty=dirty, runtime_requirement=runtime_requirement,
                     repository="https://github.com/samurake/rehlds-m",
                     source_url=f"https://github.com/samurake/rehlds-m/tree/{info['revision']}")
         (staging / "build-info.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
-        installation = ((ROOT / "tools/release/INSTALL-linux.md").read_text(encoding="utf-8")
-                        if args.platform == "linux-i386" else
-                        "Windows installation: stop the server, back up the existing launcher and CRT DLLs,\n"
-                        "then copy hlds.exe and every included x86 CRT DLL into the server root together.\n"
-                        "Windows supplies the Universal CRT. Start the server through its normal entry.\n")
+        installation_file = "INSTALL-linux.md" if args.platform == "linux-i386" else "INSTALL-windows.md"
+        installation = (ROOT / "tools/release" / installation_file).read_text(encoding="utf-8")
         (staging / "README.txt").write_text(
             f"ReHLDS-M {label} - {args.platform}\n\n"
             f"Source: {info['source_url']}\nRequired: {runtime_requirement}\n"
             "CPU: SSE4.2. Launcher only; engine, game DLL and plugins are supplied separately.\n"
             f"\n{installation}\n"
             "Use --version to identify this launcher without loading the engine.\n"
-            "Candidate builds have not been qualified with real player load on the hosting provider.\n",
+            "Installation and startup settings are documented above and in rehldsm.cfg.\n",
             encoding="utf-8")
         checksums = [(p.relative_to(staging).as_posix(), digest(p)) for p in sorted(staging.rglob("*")) if p.is_file()]
         (staging / "SHA256SUMS.txt").write_text(

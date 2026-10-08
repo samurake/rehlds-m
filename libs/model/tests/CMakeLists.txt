@@ -23,6 +23,8 @@ target_sources("${TARGET_NAME}"
   PRIVATE
     "${CPP_SOURCES_DIR}/userinput_history.cpp"
     "${CPP_SOURCES_DIR}/server_loop.cpp"
+    "${CPP_SOURCES_DIR}/frame_metrics.cpp"
+    "${CPP_SOURCES_DIR}/metrics_reporter.cpp"
 )
 
 #-------------------------------------------------------------------------------

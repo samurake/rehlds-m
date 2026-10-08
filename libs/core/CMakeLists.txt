@@ -30,11 +30,15 @@ target_sources("${TARGET_NAME}"
     "${HPP_SOURCES_DIR}/cmdline_args.hpp"
     "${HPP_SOURCES_DIR}/cmdline_processor.hpp"
     "${HPP_SOURCES_DIR}/init.hpp"
+    "${HPP_SOURCES_DIR}/startup_config.hpp"
+    "${HPP_SOURCES_DIR}/launcher_commands.hpp"
 
   PRIVATE
     "${CPP_SOURCES_DIR}/cmdline_args.cpp"
     "${CPP_SOURCES_DIR}/cmdline_processor.cpp"
     "${CPP_SOURCES_DIR}/init.cpp"
+    "${CPP_SOURCES_DIR}/startup_config.cpp"
+    "${CPP_SOURCES_DIR}/launcher_commands.cpp"
 )
 
 #-------------------------------------------------------------------------------

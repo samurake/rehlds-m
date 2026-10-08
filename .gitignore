@@ -505,6 +505,7 @@ crashlytics.properties
 fabric.properties
 **/build/**
 out/
+graphify-out/
 
 # Miscellaneous
 .idea/

@@ -31,16 +31,26 @@ jobs:
       - name: Validate version and tag
         id: identity
         run: python3 tools/release/package.py metadata
+      - name: Check documentation and qualification tools
+        run: |
+          python3.12 -m venv out/python-checks
+          out/python-checks/bin/python -m pip install --only-binary=:all: -r tools/linux/requirements-test.txt
+          out/python-checks/bin/python tools/release/check_docs.py
+          out/python-checks/bin/python -m unittest discover -s tools/release/tests -v
+          out/python-checks/bin/python -m unittest discover -s tools/linux/tests -v
 
   build-linux:
-    name: Linux i386 (${{ matrix.profile }})
+    name: Linux i386 (GCC ${{ matrix.toolset }}, ${{ matrix.profile }})
     needs: metadata
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        profile: [release, sanitize]
+        include:
+          - {toolset: 15, profile: release}
+          - {toolset: 11, profile: release}
+          - {toolset: 11, profile: sanitize}
     env:
       BUILD_PROFILE: ${{ matrix.profile }}
       BUILD_LABEL: ${{ needs.metadata.outputs.label }}
@@ -49,7 +59,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Build toolchain image
-        run: docker build -t rehldsm-builder -f tools/linux/Dockerfile tools/linux
+        run: docker build --build-arg GCC_TOOLSET=${{ matrix.toolset }} -t rehldsm-builder -f tools/linux/Dockerfile tools/linux
       - name: Build, test, inspect and package
         run: |
           mkdir -p out/ci
@@ -76,7 +86,7 @@ jobs:
             --mount "type=bind,source=$PWD/out/ci,target=/candidate" \
             rehldsm-compat python3 /source/tools/linux/compat.py check /candidate
       - name: Upload release package
-        if: matrix.profile == 'release'
+        if: matrix.profile == 'release' && matrix.toolset == 15
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: packages-linux-i386
@@ -87,13 +97,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: validation-linux-${{ matrix.profile }}
+          name: validation-linux-gcc${{ matrix.toolset }}-${{ matrix.profile }}
           path: |
             out/ci/*.txt
             out/ci/*.xml
             out/ci/*.jsonl
             out/ci/compatibility.json
             out/ci/*/artifact-manifest.json
+            out/ci/*/build-provenance.json
           retention-days: 30
 
   build-windows:
@@ -163,13 +174,8 @@ jobs:
           test -f "dist/rehldsm-${RELEASE_TAG}-linux-i386.tar.gz"
           test -f "dist/rehldsm-${RELEASE_TAG}-windows-x86.zip"
           (cd dist && sha256sum --check --strict *.sha256)
-          {
-            printf '# ReHLDS-M %s\n\n' "$RELEASE_TAG"
-            cat tools/release/INSTALL-linux.md
-            printf '\n'
-            cat "docs/releases/${RELEASE_VERSION}.md"
-            printf '\nSource commit: `%s`\n' "$GITHUB_SHA"
-          } > release-notes.md
+          python3 tools/release/notes.py --repository "$GH_REPO" \
+            --revision "$GITHUB_SHA" --output release-notes.md
           if gh release view "$RELEASE_TAG" --json isDraft > existing-release.json 2>/dev/null; then
             test "$(jq -r .isDraft existing-release.json)" = true || {
               echo 'Refusing to overwrite an already published release.' >&2

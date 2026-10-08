@@ -22,6 +22,7 @@ set(CPP_SOURCES_DIR "${PROJECT_SOURCE_DIR}/src/${TESTED_TARGET_NAME}")
 target_sources("${TARGET_NAME}"
   PRIVATE
     "${CPP_SOURCES_DIR}/cmdline_args.cpp"
+    "${CPP_SOURCES_DIR}/startup_config.cpp"
 )
 
 #-------------------------------------------------------------------------------

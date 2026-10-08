@@ -61,16 +61,16 @@ set(SPDLOG_USE_STD_FORMAT OFF CACHE INTERNAL
   "Use std::format instead of fmt library." FORCE
 )
 
-set(SPDLOG_FMT_EXTERNAL OFF CACHE INTERNAL
+set(SPDLOG_FMT_EXTERNAL ON CACHE INTERNAL
   "Use external fmt library instead of bundled." FORCE
 )
 
-set(SPDLOG_FMT_EXTERNAL_HO ON CACHE INTERNAL
+set(SPDLOG_FMT_EXTERNAL_HO OFF CACHE INTERNAL
   "Use external fmt header-only library instead of bundled." FORCE
 )
 
-set(SPDLOG_NO_EXCEPTIONS ON CACHE INTERNAL
-  "Compile with -fno-exceptions. Call abort() on any spdlog exceptions." FORCE
+set(SPDLOG_NO_EXCEPTIONS OFF CACHE INTERNAL
+  "Allow optional sink failures to be isolated without aborting the launcher." FORCE
 )
 
 set(SPDLOG_PREVENT_CHILD_FD OFF CACHE INTERNAL

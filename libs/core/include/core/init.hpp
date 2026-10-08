@@ -21,16 +21,19 @@
 #pragma once
 
 #include "core/cmdline_args.hpp"
+#include "core/startup_config.hpp"
 #include "model/server_loop.hpp"
 #include "util/log_output.hpp"
 #include "view/console_view.hpp"
 #include <memory>
 
 namespace Core {
-    void init_logger(const CmdLineArgs& args, const std::shared_ptr<Util::LogOutput>& log_output);
+    void init_logger(
+      const CmdLineArgs& args, const std::shared_ptr<Util::LogOutput>& log_output,
+      const StartupSettings& settings = {});
     void init_locale();
     void init_socket();
     void init_filesystem();
     void init_engine(const CmdLineArgs& args);
-    bool init_server_loop(const CmdLineArgs& args, Model::ServerLoop& server_loop);
+    bool init_server_loop(const CmdLineArgs& args, const StartupSettings& settings, Model::ServerLoop& server_loop);
 }

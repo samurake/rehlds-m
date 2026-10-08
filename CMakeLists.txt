@@ -35,7 +35,7 @@ option(BUILD_BENCHMARKS          "Build the synthetic launcher frame benchmark" 
 option(BUILD_UNIT_TESTS         "Build unit tests"                                                    OFF)
 option(CODE_COVERAGE            "Generate a coverage target using LCOV and genhtml"                   OFF)
 option(ENABLE_RTTI              "Enable support for run-time type information (RTTI)"                 OFF)
-option(ENABLE_EXCEPTIONS        "Enable support for exception handling"                          ${WIN32})
+option(ENABLE_EXCEPTIONS        "Enable support for exception handling (required for worker isolation)" ON)
 option(ENABLE_CLANG_TIDY        "Enable static analysis with Clang-Tidy"                              OFF)
 option(ENABLE_CPPCHECK          "Enable static analysis with Cppcheck"                                OFF)
 option(ENABLE_PVS_STUDIO        "Enable static analysis with PVS-Studio"                              OFF)
@@ -44,6 +44,10 @@ option(ENABLE_ASAN              "Enable AddressSanitizer"                       
 option(ENABLE_UBSAN             "Enable UndefinedBehaviorSanitizer"                                   OFF)
 option(ENABLE_LINK_TRACE        "Enable linker trace flag (detailed output of the linking process)"   OFF)
 option(OPTIMIZE_FOR_CURRENT_CPU "Generate code optimized for the current (native) processor"          OFF)
+
+if(NOT ENABLE_EXCEPTIONS)
+  message(FATAL_ERROR "ENABLE_EXCEPTIONS=ON is required to contain optional output/metrics worker failures")
+endif()
 
 #-------------------------------------------------------------------------------
 # Output Directories
@@ -153,7 +157,12 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Enable error reporting for deprecated features
-set(CMAKE_ERROR_DEPRECATED ON)
+if(POLICY CMP0218)
+  cmake_policy(SET CMP0218 NEW)
+  cmake_diagnostic(SET CMD_DEPRECATED SEND_ERROR)
+else()
+  set(CMAKE_ERROR_DEPRECATED ON)
+endif()
 
 #-------------------------------------------------------------------------------
 # CMake Modules and Dependencies

@@ -1,54 +1,70 @@
-# Build and release workflow
+# Release procedure
 
-The fork is `samurake/rehlds-m`; development for this release is on
-`release/1.4.0`. `upstream` points to `hun1er/rehlds-m`, and `origin` points to the
-fork. GitHub Actions builds Linux i386 Release, Linux ASan/UBSan and Windows x86
-Release for every branch push, pull request and manual workflow dispatch.
+The numeric version comes from `CMakeLists.txt`; notes live in
+`docs/releases/<version>.md`. Version 1.4.0 uses the stable tag `v1.4.0`.
 
-Branch builds produce `packages-linux-i386`, `packages-windows-x86` and validation
-artifacts. Download the package artifact from the completed workflow run and
-extract the inner tar.gz or zip. The inner archives preserve the intended package
-layout; the Linux tar preserves executable permission.
+## Checks
 
-To publish a candidate after reviewing the branch build:
+GitHub Actions runs on branch pushes, pull requests, manual dispatch and version tags:
+
+- GCC 15 Linux i386 Release; this is the published Linux package.
+- GCC 11 Linux i386 Release fallback.
+- GCC 11 Linux ASan/UBSan with leak detection.
+- MSVC Windows x86 Release.
+- Documentation links and offline qualification/release helper tests.
+
+Both Linux release archives run the exported regression suite and unwind probe
+on frozen GLIBC 2.34 without the GLIBC_2.35 backport. Only the GCC 15 and Windows
+packages publish. See [testing](../../docs/testing.md) for local qualification.
+
+`package.py` checks source/tag identity, tracked-source cleanliness, executable
+architecture, version banner, runtime manifests/hashes, portable build provenance
+and the build's copy of `rehldsm.cfg`. It stages an explicit file list with
+licenses, checksums and installation instructions. Diagnostic/native builds are
+not portable release packages.
+
+`--allow-dirty` permits local packaging checks only; CI never uses it.
+A dirty local package is not a substitute for the final clean-source CI artifacts.
+Changing code after qualification requires rebuilding and repeating affected checks.
+
+## Publishing
+
+Commit the reviewed source and documentation, then confirm the branch build passes.
+To publish the stable version:
 
 ```sh
-git tag -a v1.4.0-rc.1 -m "ReHLDS-M 1.4.0 release candidate 1"
-git push origin v1.4.0-rc.1
+git tag -a v1.4.0 -m "ReHLDS-M 1.4.0"
+git push origin v1.4.0
 ```
 
-The tag triggers fresh builds. Publication needs every build and sanitizer job
-to pass. Version tags must match the numeric version in `CMakeLists.txt`; a
-suffix such as `-rc.1` publishes a prerelease without marking it latest. A plain
-numeric tag publishes a stable release. Update `docs/releases/<version>.md`
-when increasing the CMake version. Tags are not moved after publication.
+These commands publish externally; run them only when release publication is intended.
+A version suffix such as `-rc.2` produces a prerelease, not a stable release.
 
-The release job verifies downloaded archive checksums, creates a draft, uploads
-both platforms, then publishes it. Only this job has `contents: write`. It uses
-the built-in `GITHUB_TOKEN`; no personal token or game-server credentials need
-to be stored as secrets. A failed upload can be retried while the release is
-still a draft. An already published release is never replaced automatically.
+The tag triggers fresh builds. The publication job waits for every lane, verifies
+downloaded archive hashes, creates a draft, uploads both platforms and publishes.
+Published tags/releases are not replaced automatically. Failed uploads can be
+retried while the release remains a draft.
 
-Actions are pinned to full commit hashes. Pull requests cannot enter the
-publication job, and checkout does not persist credentials in the source tree.
-The earlier automatic release-drafting workflow is replaced by this tested tag
-publication flow to avoid conflicting version selection.
+`notes.py` combines the cumulative changelog with both installation guides.
+It converts repository-relative documentation links to URLs pinned to the
+released commit, so links work on the GitHub release page too.
 
-`package.py` checks executable architecture, source version/revision, tracked
-source cleanliness, Linux runtime hashes and the standalone version output.
-It packages only explicitly selected runtime files, manifests and notices.
-Linux archives contain both C++ runtime libraries with RPM provenance and enforce
-GLIBC_2.34 as the maximum imported symbol version. An extracted-archive test on
-unbackported glibc 2.34 is required before publication. `check-host.sh` provides a
-read-only host preflight. System glibc and its loader remain provider-managed.
-Windows archives contain the unmodified x86 Release CRT DLLs from the installed
-Visual Studio redistribution directory, its redistribution notice and a dependency
-manifest. Unexpected non-system DLL dependencies fail the build. Windows itself
-supplies system DLLs and the Universal CRT (Windows 10/Server 2016 or later).
-`--allow-dirty` exists solely for local packaging validation and is never passed
-by CI. Release/source information and dependency licenses accompany both archives.
+Only the publication job has write permission. It uses GitHub's built-in token;
+checkout does not persist credentials. No FTP or game-server credentials are needed.
 
-Linux build details are in [../linux/README.md](../linux/README.md); the Windows
-entry point is `tools/windows/build.cmd` and discovers Visual Studio 2022 through
-`vswhere`. These are launcher builds. Game-server installation and host runtime
-qualification remain separate from GitHub publication.
+## Package installation
+
+Linux archives preserve executable permissions and bundle `libstdc++.so.6` and
+`libgcc_s.so.1`, with a GLIBC_2.34 symbol ceiling. The host supplies glibc and
+its matching loader. Run `check-host.sh` from the complete extracted archive
+before installation; see [Linux installation](INSTALL-linux.md).
+
+Windows archives contain only the launcher's transitive x86 Release CRT DLL
+dependencies and redistribution notice, not the complete vendor CRT directory.
+Windows supplies the Universal CRT and system DLLs. Replace the launcher and
+bundled CRT files together while the server is stopped; see
+[Windows installation](INSTALL-windows.md).
+
+Source identity is in `build-info.json`, compiler/dependency identity in
+`build-provenance.json`, and runtime requirements in `artifact-manifest.json`.
+Packages exclude the engine, game DLL, Metamod and AMXX.

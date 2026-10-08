@@ -22,11 +22,22 @@
 
 #include "util/log_output.hpp"
 #include "view/base_view.hpp"
-#include <fmt/core.h>
+#include <fmt/format.h>
+#include <cerrno>
+#include <chrono>
+#include <fcntl.h>
+#include <poll.h>
+#include <unistd.h>
 
 namespace View {
     class ConsoleView final : public BaseView, public Util::LogOutput {
       public:
+        ~ConsoleView() override
+        {
+            if (async_fd_ >= 0)
+                ::close(async_fd_);
+        }
+
         /**
          * @brief Prints the given text.
          *
@@ -52,6 +63,10 @@ namespace View {
          * @param message The formatted log message to be written.
          */
         void write_log(std::string_view message) override;
+        bool try_write_log(std::string_view message) override;
+
+      private:
+        int async_fd_{-1}; // Owned by the single output worker, not the input thread.
     };
 
     inline void ConsoleView::display_server_status(
@@ -70,5 +85,37 @@ namespace View {
     inline void ConsoleView::write_log(const std::string_view message)
     {
         print(message);
+    }
+
+    inline bool ConsoleView::try_write_log(std::string_view message)
+    {
+        // Reopen rather than dup: O_NONBLOCK must not change the caller's stdout
+        // open-file description (shared with the terminal/panel/input thread).
+        if (async_fd_ < 0)
+            async_fd_ = ::open("/proc/self/fd/1", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+        if (async_fd_ < 0)
+            return false;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{20};
+        while (!message.empty()) {
+            const auto written = ::write(async_fd_, message.data(), message.size());
+            if (written > 0)
+                message.remove_prefix(static_cast<std::size_t>(written));
+            else if (written < 0 && errno == EINTR)
+                continue;
+            else if (written < 0 && errno == EAGAIN) {
+                const auto left =
+                  std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+                if (left.count() <= 0)
+                    return false;
+                pollfd fd{async_fd_, POLLOUT, 0};
+                if (::poll(&fd, 1, static_cast<int>(left.count())) <= 0 || !(fd.revents & POLLOUT))
+                    return false;
+            }
+            else
+                return false;
+            if (!message.empty() && std::chrono::steady_clock::now() >= deadline)
+                return false;
+        }
+        return true;
     }
 }

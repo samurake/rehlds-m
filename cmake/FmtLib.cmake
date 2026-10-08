@@ -2,7 +2,10 @@
 FetchContent_Declare(
   FmtLib
   GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-  GIT_TAG        40626af88bd7df9a5fb80be7b25ac85b122d6c21 # 11.2.0
+  GIT_TAG        1be298e1bd68957e4cd352e1f676f00e07dcfb57 # 12.2.0
+  PATCH_COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=<SOURCE_DIR>"
+    "-DPATCH_FILE=${CMAKE_CURRENT_LIST_DIR}/patches/fmt-12.2-i386.patch"
+    -P "${CMAKE_CURRENT_LIST_DIR}/ApplyFmtPatch.cmake"
 )
 
 set(FMT_OS ON CACHE INTERNAL

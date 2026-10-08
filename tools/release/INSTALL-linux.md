@@ -1,49 +1,48 @@
-## Linux installation: exact files and destination
+## Linux installation: files and destination
 
-The destination is the **game server root**: the directory containing
-`hlds_linux`, `hlds_run`, and the `cstrike/` folder. The three runtime files
-must be beside each other in that directory.
+Stop the server before replacement. Install in the **server root** containing
+`hlds_run` and the game directory (for example `cstrike/`), not inside the game
+or `addons/` directories.
 
-| File from the archive | Action | Destination | Typical permissions |
-| --- | --- | --- | --- |
-| `hlds_linux` | Replace the existing launcher | `<server-root>/hlds_linux` | `0755` (executable) |
-| `libstdc++.so.6` | Replace if present; otherwise add | `<server-root>/libstdc++.so.6` | `0644` (readable) |
-| `libgcc_s.so.1` | Replace if present; otherwise add | `<server-root>/libgcc_s.so.1` | `0644` (readable) |
+| Archive file | Install path | Permissions |
+| --- | --- | --- |
+| `hlds_linux` | `<server-root>/hlds_linux` | `0755` |
+| `libstdc++.so.6` | `<server-root>/libstdc++.so.6` | `0644` |
+| `libgcc_s.so.1` | `<server-root>/libgcc_s.so.1` | `0644` |
+| `rehldsm.cfg` | `<server-root>/rehldsm.cfg` | `0644` |
 
-These are the only three files required at runtime from this Linux archive.
-They do **not** belong in `cstrike/`, `addons/`, `amxmodx/modules/`, `/lib/`,
-or `/usr/lib/`. Keep `hlds_run`, the engine, game DLL, server configuration,
-and AMXX/Metamod plugins in place. Do not remove other existing libraries as
-part of this launcher installation.
+The first three are required launcher runtime files. The cfg is required for
+the documented target/async profile, but the launcher can start without it
+using built-in defaults. The sample uses `target_fps = 1500`, not 2000.
+Preserve existing custom values; do not blindly overwrite an installed cfg.
 
-1. Extract the complete archive into a separate staging directory. Keep all
-   its files together and run `sh ./check-host.sh` there using a **Linux system
-   shell**, or ask the provider to run it. This is not an in-game/RCON console
-   command. It checks every packaged file and the launcher dependencies without
-   starting the game. The host needs 32-bit glibc >= 2.34, `/lib/ld-linux.so.2`,
-   and an SSE4.2 CPU; no glibc or loader file should be uploaded from elsewhere.
-2. Stop the server using the hosting panel and ensure automatic restart will
-   not start it during replacement. Back up the existing three target files;
-   record any that were originally absent.
-3. Upload/copy the three runtime files in the table into the game server root.
-   Preserve executable permission on `hlds_linux` and readable permission on
-   both `.so` files. If FTP rejects replacement or uploaded files disappear,
-   have the provider install these exact three files and set their permissions.
-4. Start the server through its normal hosting-panel entry or existing
-   `hlds_run` wrapper. A full process restart is required; changing map alone
-   does not activate a new launcher. Check the version banner and server logs.
-5. To roll back, stop the server, restore the original files, remove only a
-   runtime file that this installation added to a previously absent path,
-   and start the server again.
+1. Extract the complete archive to a separate staging directory. Run
+   `sh ./check-host.sh` using a Linux system shell there, or ask the provider
+   to run it. This verifies package checksums, dependencies and immediate
+   symbol binding without starting the engine; it is not an RCON command.
+2. The host must supply **32-bit glibc 2.34+**, `/lib/ld-linux.so.2` and an
+   SSE4.2 CPU. Do not install packaged files in `/lib/` or `/usr/lib/`, and
+   never replace the host's glibc or loader with files from another machine.
+3. Stop the server and disable panel auto-restart during replacement. Back up
+   the launcher, both runtime paths and any existing cfg; record absent files.
+4. Copy the files in the table into the server root and set permissions.
+   Leave `hlds_run`, engine/game libraries, other existing libraries and
+   Metamod/AMXX plugins in place. This archive does not replace them.
+5. Remove the obsolete `-targetfps` launch option. Set `target_fps` in the cfg,
+   within 0–2000, and keep `sys_ticrate 0` and `fps_max 0` in
+   `<server-root>/cstrike/server.cfg` (or the selected game's `server.cfg`)
+   when using target pacing. `target_fps = 0` selects capped pingboost 0–5.
+6. Validate with `./hlds_linux --check-config`, then start through the normal
+   panel entry or `hlds_run`. Verify the banner and run `rehldsm_version`
+   in console/RCON. Every cfg setting loads only at process startup; a map
+   change or engine `exec` does not reload it.
 
-`check-host.sh`, `SHA256SUMS.txt`, `artifact-manifest.json`, `build-info.json`,
-`libgcc-package.txt`, `libstdcpp-package.txt`, `README.txt`, `LICENSE`, and
-`licenses/` are validation, provenance, or documentation files. Keep them with
-the complete extracted package; the launcher does not load them. Running the
-checksum script after copying only the three runtime files will fail because
-the other packaged files are absent.
+Rollback: stop the server, restore the backed-up files/cfg, remove only paths
+introduced by this installation, restore old launch options and restart.
 
-The same launcher supports competitive and ZP servers. This release contains
-no named competitive/ZP preset; installation preserves the chosen startup
-arguments. Selecting the improved target-FPS pacing is a separate configuration
-step using `-targetfps`; see the repository's command-line documentation.
+`check-host.sh`, `SHA256SUMS.txt`, the manifests/build/package provenance,
+`README.txt`, `LICENSE` and `licenses/` are validation/documentation/legal
+files, not game runtime files. Keep the complete staging archive for checks
+and rollback. The checksum script needs all archived files, not just the
+four copied to the server root. No test executable, instrumentation, engine,
+plugin, glibc, loader or Intel runtime is included.

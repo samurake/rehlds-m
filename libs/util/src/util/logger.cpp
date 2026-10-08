@@ -24,15 +24,15 @@
 #include <spdlog/formatter.h>
 #include <spdlog/logger.h>
 #include <spdlog/sinks/base_sink.h>
-#include <array>
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <mutex>
-
 #include <vector>
 
 namespace spdlog::sinks {
@@ -42,6 +42,8 @@ namespace spdlog::sinks {
 namespace {
     Util::LogSettings logger_settings{};
     std::shared_ptr<spdlog::logger> logger{};
+    std::shared_ptr<Util::AsyncLogSink> async_sink{};
+    std::shared_ptr<std::atomic<std::uint64_t>> output_write_failures = std::make_shared<std::atomic<std::uint64_t>>(0);
 
     class Formatter final : public spdlog::formatter {
       public:
@@ -55,7 +57,8 @@ namespace {
                 case spdlog::level::critical: prefix = "[FATAL ERROR] "; break;
                 default: break;
             }
-            if (!prefix.empty()) dest.append(prefix.data(), prefix.data() + prefix.size());
+            if (!prefix.empty())
+                dest.append(prefix.data(), prefix.data() + prefix.size());
             constexpr std::size_t max_message_bytes = 8192;
             const auto length = std::min(msg.payload.size(), max_message_bytes);
             dest.append(msg.payload.data(), msg.payload.data() + length);
@@ -63,7 +66,8 @@ namespace {
                 constexpr std::string_view suffix = " [log message truncated]\n";
                 dest.append(suffix.data(), suffix.data() + suffix.size());
             }
-            else if (msg.level != spdlog::level::info) dest.push_back('\n');
+            else if (msg.level != spdlog::level::info)
+                dest.push_back('\n');
 
 #ifdef _WIN32
             if (!prefix.empty()) {
@@ -90,8 +94,15 @@ namespace {
          *
          * @param log_output The LogOutput instance to handle the actual logging.
          */
-        explicit LogOutputSink(std::shared_ptr<Util::LogOutput> log_output) : log_output_(std::move(log_output))
+        explicit LogOutputSink(
+          std::shared_ptr<Util::LogOutput> log_output, bool buffered,
+          std::shared_ptr<std::atomic<std::uint64_t>> failures) :
+          log_output_(std::move(log_output)),
+          buffered_(buffered),
+          failures_(std::move(failures))
         {
+            if (buffered_)
+                buffer_.reserve(65536);
         }
 
       protected:
@@ -107,7 +118,14 @@ namespace {
         {
             spdlog::memory_buf_t formatted;
             spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, formatted);
-            log_output_->write_log(std::string_view{formatted.data(), formatted.size()});
+            const std::string_view text{formatted.data(), formatted.size()};
+            if (!buffered_)
+                log_output_->write_log(text);
+            else {
+                if (buffer_.size() + text.size() > 65536)
+                    flush_();
+                buffer_.append(text);
+            }
         }
 
         /**
@@ -117,49 +135,82 @@ namespace {
          */
         void flush_() override
         {
-            // The view must implement this
+            if (!buffer_.empty()) {
+                if (!log_output_->try_write_log(buffer_))
+                    ++*failures_;
+                buffer_.clear();
+            }
         }
 
       private:
         ///< The LogOutput instance handling the actual logging.
         std::shared_ptr<Util::LogOutput> log_output_;
+        bool buffered_{};
+        std::string buffer_{};
+        std::shared_ptr<std::atomic<std::uint64_t>> failures_;
     };
+
     // Optional diagnostic output must not abort the game on an I/O failure.
     class ResilientFileSink final : public spdlog::sinks::base_sink<std::mutex> {
       public:
         explicit ResilientFileSink(const std::string& path)
         {
             file_ = std::fopen(path.c_str(), "ab");
-            if (!file_) { report_failure(); return; }
+            if (!file_) {
+                report_failure();
+                return;
+            }
             (void)std::setvbuf(file_, buffer_.data(), _IOFBF, buffer_.size());
         }
+
         ResilientFileSink(const ResilientFileSink&) = delete;
         ResilientFileSink& operator=(const ResilientFileSink&) = delete;
-        ~ResilientFileSink() override { if (file_) std::fclose(file_); }
+
+        ~ResilientFileSink() override
+        {
+            if (file_)
+                std::fclose(file_);
+        }
+
       protected:
         void sink_it_(const spdlog::details::log_msg& msg) override
         {
-            if (!file_) return;
+            if (!file_)
+                return;
             spdlog::memory_buf_t formatted;
             formatter_->format(msg, formatted);
             if (std::fwrite(formatted.data(), 1, formatted.size(), file_) != formatted.size()) {
-                disable(); return;
+                disable();
+                return;
             }
             const auto now = std::chrono::steady_clock::now();
-            if (now - last_flush_ >= std::chrono::seconds{1}) { flush_(); last_flush_ = now; }
+            if (now - last_flush_ >= std::chrono::seconds{1}) {
+                flush_();
+                last_flush_ = now;
+            }
         }
-        void flush_() override { if (file_ && std::fflush(file_) != 0) disable(); }
+
+        void flush_() override
+        {
+            if (file_ && std::fflush(file_) != 0)
+                disable();
+        }
+
       private:
         static void report_failure()
         {
             std::fprintf(stderr, "[ReHLDS-M] Optional file logging disabled: %s\n", std::strerror(errno));
         }
+
         void disable()
         {
             report_failure();
-            auto* file = file_; file_ = nullptr;
-            if (file) std::fclose(file);
+            auto* file = file_;
+            file_ = nullptr;
+            if (file)
+                std::fclose(file);
         }
+
         std::FILE* file_{};
         std::array<char, 64 * 1024> buffer_{};
         std::chrono::steady_clock::time_point last_flush_{};
@@ -170,7 +221,9 @@ namespace {
 namespace Util {
     void log_init(const LogSettings& settings)
     {
+        log_shutdown();
         logger_settings = settings;
+        output_write_failures = std::make_shared<std::atomic<std::uint64_t>>(0);
         spdlog::drop_all();
 
         std::vector<spdlog::sink_ptr> sinks{};
@@ -178,16 +231,27 @@ namespace Util {
         sinks.reserve(max_sinks);
 
         if ((settings.output & LogDestination::view) == LogDestination::view) {
-            sinks.emplace_back(std::make_shared<LogOutputSink<std::mutex>>(settings.log_output));
+            sinks.emplace_back(std::make_shared<LogOutputSink<std::mutex>>(
+              settings.log_output, settings.asynchronous, output_write_failures));
         }
 
         if ((settings.output & LogDestination::file) == LogDestination::file) {
             sinks.emplace_back(std::make_shared<ResilientFileSink>(settings.logfile));
         }
 
-        logger = std::make_shared<spdlog::logger>("main", sinks.cbegin(), sinks.cend());
+        if (settings.asynchronous) {
+            async_sink =
+              std::make_shared<AsyncLogSink>(std::move(sinks), settings.queue_capacity, settings.flush_interval_ms);
+            logger = std::make_shared<spdlog::logger>("main", async_sink);
+        }
+        else
+            logger = std::make_shared<spdlog::logger>("main", sinks.cbegin(), sinks.cend());
         logger->flush_on(static_cast<spdlog::level::level_enum>(settings.flush_on));
         logger->set_level(static_cast<spdlog::level::level_enum>(settings.level));
+        // No recursive logging or blocking stderr writes from an error handler.
+        logger->set_error_handler([failures = output_write_failures](const std::string&) {
+            ++*failures;
+        });
         logger->set_formatter(std::make_unique<Formatter>());
 
         register_logger(logger);
@@ -210,5 +274,36 @@ namespace Util {
     const LogSettings& log_settings()
     {
         return logger_settings;
+    }
+
+    OutputStats log_output_stats()
+    {
+        auto stats = async_sink ? async_sink->stats() : OutputStats{};
+        stats.write_failures += output_write_failures->load();
+        return stats;
+    }
+
+    bool log_flush(std::chrono::milliseconds timeout)
+    {
+        if (async_sink)
+            return async_sink->flush_and_wait(timeout);
+        if (logger)
+            logger->flush();
+        return true;
+    }
+
+    bool log_shutdown(std::chrono::milliseconds timeout)
+    {
+        const bool drained = !async_sink || async_sink->stop(timeout);
+        if (!async_sink && logger)
+            logger->flush();
+        spdlog::drop("main");
+        if (logger && spdlog::default_logger() == logger)
+            spdlog::set_default_logger(nullptr);
+        logger.reset();
+        async_sink.reset();
+        // Release the caller's output ownership; detached workers own their sinks.
+        logger_settings.log_output.reset();
+        return drained;
     }
 }

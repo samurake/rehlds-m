@@ -1,172 +1,163 @@
 # ReHLDS-M
 
-**English** | **[Русский](README.ru.md)**
+English | [Русский](README.ru.md)
 
-This fork develops ReHLDS-M **1.4.0**, based on [hun1er/rehlds-m](https://github.com/hun1er/rehlds-m).
-[Download builds](https://github.com/samurake/rehlds-m/releases) · [Build pipeline](https://github.com/samurake/rehlds-m/actions/workflows/build-and-test.yml)
+ReHLDS-M 1.4.0 replaces the HLDS launcher on Linux and Windows. This fork is
+based on [hun1er/rehlds-m](https://github.com/hun1er/rehlds-m). The engine, game
+DLL, Metamod and AMXX plugins remain separate.
 
----
-
-Rehlds-m is a modern, cross-platform launcher for the Half-Life Dedicated Server (HLDS), written from scratch in C++20. It acts as a replacement for the standard `hlds.exe` executable, providing enhanced performance, stability, and a host of new features for server administrators, while maintaining full compatibility with the original engine libraries (`swds.dll` on Windows, `engine_i486.so` on Linux) and game mods.
-
-## Key Features & Differences from original HLDS/ReHLDS
-
-- **Modern Codebase:** Written in C++20 using modern practices and the Standard Template Library (STL).
-- **Performance:** Compiled for modern CPUs with SSE4.2 instruction set support for maximum efficiency.
-- **Enhanced Console:**
-  - **Advanced Input:** Full support for `HOME`, `END`, and `DELETE` keys for easier command editing.
-  - **Command History:** The last 100 commands are saved to `input_history.txt` and loaded on startup. Navigation with arrow keys is fully supported.
-  - **Improved Status Bar (Windows):** The server status bar is no longer tied to the first line and is always visible.
-- **Full UTF-8 Support:** Ensures correct display of all characters without requiring OEM conversions on Windows.
-- **New Performance Modes:**
-  - Added `-pingboost` levels 4 and 5 for more aggressive performance tuning on both Windows and Linux.
-  - Introduced the `-targetfps` parameter for adaptive real-time FPS management.
-- **New Utility Parameters:**
-  - `-conclearlog`: Clears the `qconsole.log` file on server start.
-  - `-ignoresigint`: Prevents the server from shutting down on a `CTRL+C` keypress.
-  - `-pidfile`: Saves the server's process ID to a specified file.
-- **Stability:**
-  - Fixes for several bugs present in the original ReHLDS.
-  - Advanced memory dump creation on Windows for easier crash diagnostics.
-  - Uses Winsock 2.2 on Windows (up from 2.0).
+[Downloads](https://github.com/samurake/rehlds-m/releases) ·
+[Builds](https://github.com/samurake/rehlds-m/actions/workflows/build-and-test.yml)
 
 ## Requirements
 
-- **Operating System:**
-  - Windows x86. This checkout is built and tested with Visual Studio 2022; older Windows releases need separate runtime qualification.
-  - Linux i386 with 32-bit glibc >= 2.34 and `/lib/ld-linux.so.2`. Release packages enforce a GLIBC_2.34 symbol ceiling; exact dependencies are listed in `artifact-manifest.json`.
-- **CPU:** A modern processor with support for the **SSE4.2** instruction set.
-- **Dependencies (Windows):** The x86 Visual C++ Release CRT DLLs are included. Windows 10/Server 2016 or later supplies the Universal CRT and system DLLs.
+- Linux: 32-bit glibc 2.34 or newer, `/lib/ld-linux.so.2`, and an SSE4.2 CPU.
+- Windows: Windows 10 / Server 2016 or newer; x86 Visual C++ runtime DLLs are bundled.
+- An existing HLDS/ReHLDS server installation.
 
 ## Installation
 
-For **Linux**, follow the [exact file table and installation steps](tools/release/INSTALL-linux.md).
-Only `hlds_linux`, `libstdc++.so.6`, and `libgcc_s.so.1` go into the server root,
-beside `hlds_run` and `cstrike/`. Run the host check from the complete extracted
-package first, then stop the server and back up the target files before replacing
-them. `hlds_linux` must retain execute permission. Start the server normally after
-replacement; a map change alone does not load a new launcher.
+On Linux, install `hlds_linux`, `libstdc++.so.6` and `libgcc_s.so.1` in the
+server root, beside `hlds_run` and the game directory. Keep the executable
+permission on `hlds_linux`. Follow the [installation guide](tools/release/INSTALL-linux.md)
+for package validation, backups and rollback.
 
-For **Windows**, stop the server, back up the existing launcher and runtime DLLs,
-and copy `hlds.exe` plus the included CRT DLLs together into the server root.
-Start through the normal hosting-panel entry after replacement.
+On Windows, stop the server and back up its launcher and runtime DLLs. Copy
+`hlds.exe` and every bundled CRT DLL into the server root together, then restart.
 
-## Command-Line Parameters
+Install the cfg beside the executable, not in the game directory:
 
-This launcher supports all standard HLDS parameters. Below are the new or significantly modified parameters introduced by rehlds-m.
+```text
+<server-root>/
+  hlds_linux          # Linux launcher
+  libstdc++.so.6       # Linux bundled runtime
+  libgcc_s.so.1        # Linux bundled runtime
+  rehldsm.cfg         # Launcher settings (Linux or Windows)
+  hlds_run            # Existing Linux wrapper; leave in place
+  cstrike/            # Existing game directory; leave in place
+```
 
-### Performance Tuning
+Windows uses `<server-root>/hlds.exe` and the bundled x86 CRT DLLs in the same
+directory. See the [Windows installation guide](tools/release/INSTALL-windows.md).
+Preserve an existing customized cfg. Do not copy runtime libraries into
+`cstrike/`, `addons/`, `/lib/`, `/usr/lib/` or Windows system directories.
+Archives contain only the launcher, its required runtimes, cfg, installation
+instructions, validation/provenance and licenses; no engine, plugins or test tools.
 
-#### `-pingboost <level>`
+## Configuration
 
-This parameter adjusts the server's sleep policy to control CPU usage and server FPS.
+The [sample cfg](data/rehldsm.cfg) selects a 1500-iteration/s target, 60-second
+metrics reports and asynchronous output. Targets are capped at 2000.
+For target pacing, keep `sys_ticrate 0` and `fps_max 0` in the game's `server.cfg`.
 
--   **`0`**: (Default) Standard 1ms sleep. Minimal CPU usage.
--   **`1`**: (Linux only) Uses `setitimer` for a 1ms sleep cycle.
--   **`2`**: (Linux only) Uses `poll` instead of the legacy `select` function for a 1ms sleep.
--   **`3`**: The original engine's implementation (`NET_Sleep_Timeout`). Behavior is unchanged.
--   **`4`**: (New) A more aggressive boost. The CPU sleeps for a shorter duration (1 microsecond), resulting in higher FPS and responsiveness. Available on both Linux and Windows.
--   **`5`**: (New) Maximum performance mode. The server thread yields instead of sleeping, aiming for the highest possible FPS. This will cause one CPU core to run at 100% load.
+Remove `-targetfps` from launch options before upgrading: target pacing is now
+cfg-only. Set `target_fps = 0` to use `-pingboost` levels 0–5 instead; the same
+2000-iteration/s ceiling applies. Actual engine FPS depends on engine and plugin work.
 
-#### `-targetfps <value>`
+See [configuration and metrics](docs/startup-configuration.md) for defaults,
+limits, precedence and output behavior.
 
-This uses monotonic, absolute deadlines to pace launcher iterations. Engine work counts toward each frame's time budget; the launcher sleeps only for the remaining time. Overruns skip expired deadlines without a catch-up loop.
+| `rehldsm.cfg` key | Allowed values | Built-in default | Shipped sample | Purpose |
+| --- | --- | --- | --- | --- |
+| `target_fps` | 0–2000 | 0 | 1500 | Target launcher iterations/s; 0 selects capped pingboost. |
+| `frame_stats_seconds` | 0–3600 | 0 | 60 | Periodic report interval in seconds; 0 disables automatic reports. |
+| `async_output` | `true` / `false` | false | true | Move sink formatting and console/file I/O to a worker. |
+| `output_queue_capacity` | 64–4096 | 1024 | 1024 | Bounded output slots; 1024 uses about 8 MiB. |
+| `output_flush_ms` | 10–1000 | 100 | 100 | Normal async batch/flush interval in milliseconds. |
 
--   **Usage:** `-targetfps 1000`
--   Valid values are integers from `1` to `10000`. Invalid values stop startup with an error.
--   The launcher supplies `+sys_ticrate 0` and removes `-pingboost` when this mode is selected. Keep `sys_ticrate 0` in server configuration too, since configuration files can override the command line.
--   This cannot make engine or plugin work fit a budget it already exceeds. Launcher iterations and the engine's reported FPS are separate measurements.
+Example for the 2000-target profile used in the load tests:
 
-#### `-framestats <seconds>` and `rehldsm_stats`
+```ini
+target_fps = 2000
+frame_stats_seconds = 60
+async_output = true
+output_queue_capacity = 1024
+output_flush_ms = 100
+```
 
-`-framestats 10` writes a report every ten seconds and at orderly loop exit. Valid intervals are `1` to `3600`; periodic reporting is disabled when omitted. Enter `rehldsm_stats` in the launcher console for an immediate report. This is a launcher command and is not registered as an engine/RCON command.
+All five settings load **only at process startup**; restart after editing.
+Unknown/duplicate keys and out-of-range values fail startup. A missing cfg uses
+built-in defaults; `frame_stats_seconds` overrides the optional `-framestats` flag.
+Async output is bounded and best-effort: inspect drop/failure counters rather
+than treating it as archival logging. Validate the cfg with `--check-config`.
 
-Reports include launcher frame p50/p95/p99, engine-call p99, wake lateness, lifetime maximum frame time, over-budget frames and queue saturation. Percentiles use the latest 2048 iterations. Collection uses fixed storage; reporting adds a small sorting/logging cost. Map-load and shutdown work can appear in the lifetime maximum.
+## Commands
 
-Console commands are limited to 1022 bytes, with 128 queued commands and four submitted per iteration. Oversized lines are rejected in full. A standalone `quit` has a separate slot so a full queue cannot block shutdown. Completion requests have a 250 ms timeout and are cancelled during shutdown. EOF disables the input reader while the server continues running headless.
+| Command | Use |
+| --- | --- |
+| `hlds_linux --version` / `hlds.exe --version` | Print version and source revision without loading the engine. |
+| `--check-config` | Validate startup settings without loading the engine. |
+| `rehldsm_version` | Print running launcher identity through console or RCON. |
+| `rehldsm_stats` | Request a metrics report from launcher input; not an RCON command. |
 
-### Utility Parameters
+Existing utility options include `-condebug` (launcher file logging),
+`-conclearlog`, `-ignoresigint` and `-pidfile <filename>`.
+Console input supports editing, completion and a 100-command history in
+`input_history.txt`. EOF leaves the server running headless.
 
-#### `-conclearlog`
+Run `rehldsm_version` in the server console or through RCON to confirm the
+loaded launcher, for example `rcon rehldsm_version` from a connected client.
 
-If present, this parameter will clear the contents of the `qconsole.log` file every time the server starts.
+## Measured performance
 
-#### `-ignoresigint`
+An earlier matched campaign compared the classic launcher, published RC2 and
+the cfg-only 1.4.0 development build on the same ReHLDS/ZP fixture. Each cell
+used three fresh processes, 8 s warmup and 30 s measured at a requested 2000
+rate. Values are run medians; CPU is the whole server as a percentage of one
+logical core, not the launcher's CPU alone.
 
-When used, this prevents the server from shutting down when `CTRL+C` is pressed in the console. The server can then only be shut down using the `quit` or `exit` command.
+| Players | Launcher / pacing | Accepted engine FPS | CPU/core | p99 frame gap |
+| ---: | --- | ---: | ---: | ---: |
+| 10 | Classic: `sys_ticrate 2000` | 869.2 | 7.1% | 1.951 ms |
+| 10 | RC2: `-targetfps 2000` | 1990.9 | 10.5% | 0.664 ms |
+| 10 | 1.4.0 cfg build: `target_fps = 2000` | 1981.2 | 10.4% | 0.683 ms |
+| 32 | Classic: `sys_ticrate 2000` | 813.2 | 13.2% | 3.050 ms |
+| 32 | RC2: `-targetfps 2000` | 1904.0 | 17.5% | 1.672 ms |
+| 32 | 1.4.0 cfg build: `target_fps = 2000` | 1919.9 | 17.0% | 1.411 ms |
 
-#### `-pidfile <filename>`
+That cfg build delivered about 2.28×/2.36× the classic launcher's accepted FPS
+at 10/32 players, with higher total CPU use. It did not consistently beat RC2.
+Both ReHLDS-M target profiles used `sys_ticrate 0` and `fps_max 0`.
 
-Writes the current process ID (PID) of the server to the specified file.
-- **Usage:** `-pidfile "hlds.pid"`
+The final source's separate pre-tag qualification used longer 60 s warmups and
+120 s measurements: **1990.7 FPS at 10 players and 1913.4 at 32**, three fresh
+processes each. A 30-minute measured 32-player soak passed four reloads, with
+1916.3 median FPS. These later results are not a new paired comparison against
+classic/RC2. See [benchmarks](docs/benchmarks.md) and [qualification](docs/testing.md)
+for artifact provenance, ranges and limits. Scripted fake clients do not test
+remote networking or prove production-host stability; target 2000 does not
+guarantee 2000 accepted engine frames.
 
-## Building from Source
+## Building
 
-To compile the project yourself, you will need:
+Use the [Linux builder](tools/linux/README.md) or `tools/windows/build.cmd`.
+The release matrix covers GCC 15, GCC 11, GCC 11 ASan/UBSan and MSVC x86.
 
--   [Git](https://git-scm.com/)
--   [CMake](https://cmake.org/) (version 3.21 or higher)
--   A C++20 compatible compiler (e.g., Visual Studio 2022, GCC 11+, Clang with C++20 thread support)
+For a direct build, use CMake 3.21+ and a C++20 compiler with 32-bit support:
 
-```bash
-# 1. Clone the repository
-git clone https://github.com/samurake/rehlds-m.git
-cd rehlds-m
-
-# 2. Configure the project with CMake
-cmake -B build
-
-# 3. Build the project
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_UNIT_TESTS=ON
 cmake --build build --config Release
-```
-The compiled binary is placed under `bin/<compiler>-<version>-<configuration>/` unless `BIN_OUTPUT_DIR` is supplied. Run `hlds_linux --version` or `hlds.exe --version` to print its version and source revision without loading the engine.
-
-For the qualified Linux container workflow, sanitizer profile, runtime manifests and benchmark, see [tools/linux](tools/linux/README.md). Implementation and local validation results are recorded in [the modernization report](docs/modernization-20260927.md).
-
-### GitHub builds and releases
-
-Every branch push and pull request builds Linux i386 and Windows x86, runs tests,
-and runs a separate Linux ASan/UBSan job. Successful release builds upload archives
-and SHA-256 files to the workflow run; validation evidence is retained for 30 days.
-Manual runs are also supported with `workflow_dispatch`.
-
-Pushing a matching version tag, such as `v1.4.0-rc.1`, runs the same checks and
-publishes both platform archives to GitHub Releases only after all jobs pass.
-Tags with a suffix are prereleases; plain `v1.4.0` is a stable release. The tag
-must match `CMakeLists.txt`, and version-specific notes must exist in
-`docs/releases/<version>.md`. Published releases are not overwritten by reruns.
-
-Archives include version/commit identity, runtime requirements, licenses and
-checksums. Linux tar archives preserve the launcher's executable permission.
-The pipeline uses GitHub's built-in token; it requires no FTP credentials and
-does not install builds on game servers. See [release instructions](tools/release/README.md).
-
-### Advanced Build Options
-
-#### Optimizing for the Server's CPU
-
-You can compile the launcher with optimizations tailored for the specific processor where the server will run. This enables the use of additional instruction sets (beyond the required SSE4.2), which can result in an FPS boost.
-
-To enable this option, use the `-DOPTIMIZE_FOR_CURRENT_CPU=ON` flag in step 2 of the example above:
-
-```bash
-# 2. Configure the project with CMake, optimizing for the current machine's CPU
-cmake -B build -DOPTIMIZE_FOR_CURRENT_CPU=ON
+ctest --test-dir build -C Release --output-on-failure
 ```
 
-**Warning:** Use this flag only if you are building the launcher on the same machine where it will be used.
+A direct build does not perform the release package's runtime compatibility checks.
+Binaries default to `bin/<compiler>-<version>-<configuration>/`.
 
-## F.A.Q.
+`OPTIMIZE_FOR_CURRENT_CPU=ON` selects native CPU instructions on supported
+compiler paths. Such binaries require compatible target CPUs; building in a VM
+or container targets the CPU exposed there, not a remote game server.
+Portable release builders keep this option off and already use Release optimization
+and LTO. Native targeting is not a guaranteed FPS improvement.
 
--   **Q: UTF-8 characters are not displaying correctly in the console.**
-    -   **A:** Change your console font to one that supports UTF-8 characters, such as `Consolas` or `Lucida Console`.
+## Development
 
--   **Q: The server won't start on Windows, complaining about a missing `msvcp140.dll`.**
-    -   **A:** You need to install the [Microsoft Visual C++ Redistributable 2015-2022 (x86)](https://aka.ms/vs/17/release/vc_redist.x86.exe).
-
--   **Q: The status bar is not visible on Windows 11.**
-    -   **A:** Go to Settings -> Privacy & Security -> For developers -> Terminal, and change the default terminal application to "Windows Console Host".
+- [Implementation and thread ownership](docs/architecture.md)
+- [Tests and qualification](docs/testing.md)
+- [Measured comparisons](docs/benchmarks.md)
+- [Release procedure](tools/release/README.md)
+- [1.4.0 changes](docs/releases/1.4.0.md)
 
 ## License
 
-This project is licensed under the terms of the provided `LICENSE` file. It also utilizes components of the Half-Life 1 SDK, which is subject to the license agreement from Valve Corporation.
+See [LICENSE](LICENSE). Included Half-Life SDK code also carries Valve's license.

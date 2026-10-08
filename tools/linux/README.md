@@ -1,11 +1,12 @@
-# Local Linux build from Windows
+# Linux builder
 
-This builder compiles the current checkout as an i386 Linux launcher and runs its
-CTest suite, including console, cancellation and frame-pacing regressions. It requires Docker Desktop with Linux containers. No FTP or
-game server is contacted. Source is mounted read-only; build intermediates stay
-inside the container.
+Docker builds the read-only checkout for i386; intermediates stay in the container.
+The default toolchain is GCC Toolset 15 with Ninja on the pinned EL9 base.
+GCC 11 remains the release fallback and ASan/UBSan toolchain.
 
-From the repository root in PowerShell:
+## Build and test
+
+Run from the repository root in PowerShell:
 
 ```powershell
 $repo = (Get-Location).Path
@@ -20,83 +21,91 @@ docker run --rm `
 if ($LASTEXITCODE -ne 0) { throw 'Build or verification failed' }
 ```
 
-The output contains `linux-i386/hlds_linux`, its GCC C++ runtimes, SHA-256 and ELF
-dependency manifests, `tests.xml`, `frame-benchmark.jsonl`, `toolchain.txt`,
-`source-revision.txt` and `source-status.txt`. A dirty status means the revision
-alone does not identify the complete source. CMake downloads dependencies pinned
-to commits in `cmake/`. The builder fixes the base
-image digest; RPM repositories remain updateable, so this is a repeatable build
-workflow, not a promise of bit-for-bit reproducibility across future dates.
+For GCC 11, build a separate image with `--build-arg GCC_TOOLSET=11`.
+For sanitizers, use that image, a fresh output directory and
+`-e BUILD_PROFILE=sanitize`. `BUILD_JOBS` controls build/test parallelism.
 
-The two libstdc++ development architectures in the Dockerfile are intentional:
-GCC's x86-64 multilib driver needs the x86-64 package's `32` header layout as well
-as the i686 link libraries. Only installing the i686 development package failed
-with `bits/c++config.h` missing.
+Release builds enable C++20, LTO and stack protection, with native CPU targeting
+off. Outputs include the launcher, bundled C++ runtimes, documented cfg,
+CTest XML, synthetic benchmark, dependency manifests and build provenance.
+Pinned source dependencies and base images do not freeze RPM repositories;
+the workflow does not promise bit-for-bit reproducibility across dates.
 
-## Runtime compatibility
+Both libstdc++ development architectures are required: the multilib driver uses
+the x86-64 package's 32-bit header layout and the i686 link libraries.
 
-The output is for **32-bit Linux**, with the project's existing SSE4.2 CPU
-requirement. It uses C++20, Release, LTO, stack protection, and `OPTIMIZE_FOR_CURRENT_CPU=OFF`.
-It does not bundle an engine, game DLL, AMXX, glibc, or loader.
+## Runtime and packaging
 
-Every release enforces a **GLIBC_2.34** symbol ceiling for the launcher,
-`libstdc++.so.6`, and `libgcc_s.so.1`. The host supplies 32-bit glibc and
-`/lib/ld-linux.so.2`; these must stay managed together by the hosting provider.
-`GLIBC_2.35` names a symbol version, not a separately downloadable `.so` file.
+The launcher and every bundled runtime must import no GLIBC version above 2.34.
+The builder uses the compatible EL8 unwinder with the EL9 shared C++ runtime.
+The compiler's nonshared support and dependency patch are recorded with licenses.
 
-RC1's AlmaLinux 9 libgcc imported `_dl_find_object@GLIBC_2.35`, even though that
-distribution labels its backported glibc 2.34. The builder now uses the maintained
-AlmaLinux 8 i686 libgcc ABI, retaining GCC 11's compiler and libstdc++ (which supplies
-GLIBCXX_3.4.29). Both inspected unwinders export the same 141 versioned symbols.
-The selected runtime is used for the regression/sanitizer tests as well as the
-release. RPM version and source package names are included alongside its licenses.
-No library binaries or symbol versions are patched. Repositories remain updateable;
-future incompatible changes fail the dependency and baseline test gates.
+`verify.py` rejects wrong architecture, unresolved dependencies, unexpected
+libraries and newer GLIBC requirements. Sanitizer manifests are diagnostic and
+cannot be released. `compat.py` exports the tests and runs them against the
+actual extracted archive on frozen, unbackported GLIBC 2.34.
 
-The strict deployment gate is enabled by default (and can be lowered explicitly):
+For complete package validation and publication, follow
+[the release procedure](../release/README.md). Glibc and its loader remain
+host-managed; never copy them from the builder to a game server.
+
+## Isolated player-load comparison
+
+These scripts require an existing private fixture image, Docker, Python with
+NumPy and an instrumentation directory containing `frame_probe_mm_i386.so`,
+`player_load.amxx` and their source files. They do not download a server fixture.
+
+Install the tested host-side dependency with
+`python -m pip install -r tools/linux/requirements-test.txt` in a Python 3.12 environment.
+
+Test only the newly built launcher:
 
 ```powershell
-docker run --rm --network none `
-  --mount "type=bind,source=$repo,target=/source,readonly" `
-  --mount "type=bind,source=$output,target=/output" `
-  rehldsm-linux-builder python3 /source/tools/linux/verify.py `
-  /output/linux-i386 --max-glibc 2.34
+python tools/linux/compare-player-load.py `
+  --variants candidate --candidate C:/bench/current/hlds_linux `
+  --instrumentation C:/bench/instrumentation --config data/rehldsm.cfg `
+  --output out/current-load --players 10 32 `
+  --repeats 5 --seconds 120 --warmup 60
 ```
 
-Successful verification writes manifests. It rejects missing non-system libraries,
-unresolved relocations, wrong architectures and newer glibc requirements. Sanitizer
-builds explicitly allow diagnostic runtimes and cannot be packaged for release.
+The runner's `candidate` selector names the launcher under test, including a
+stable build. To compare three versions, also provide `--classic` and `--rc2`
+and select `--variants classic rc2 candidate`.
 
-CI extracts the actual release archive in the pinned `compat.Dockerfile` environment,
-checks that its libc lacks GLIBC_2.35, runs the host preflight, and reruns the release
-regression suite with immediate symbol binding and the packaged runtimes. This frozen
-OS is only a test fixture, never a shipped dependency or a production OS recommendation.
+Each independent run uses a fresh network-isolated container. The default is
+logical CPU 2, 1 GiB RAM and no CPU quota. Pinning is not exclusive CPU reservation.
+The test copy of the cfg selects 2000; the shipping sample remains 1500.
+Classic uses `sys_ticrate 2000`, RC2 uses `-targetfps 2000`, and the current
+launcher uses cfg-only pacing. The engine, game, plugins and shared runtimes match.
 
-On the host, extract the package into a staging directory and run `sh ./check-host.sh`.
-This checks hashes, executable permissions, the 32-bit loader and launcher dependency
-resolution without starting the game engine. A passing result does not qualify
-separately loaded engines/plugins or real-player performance.
+The probe measures accepted engine frames. Reports include FPS, process CPU,
+p95/p99/p99.9, maximum gaps and counts above 5/10/50 ms. Gameplay checks cover
+population, survival, weapons, movement, damage and simulation time.
+Keep other builds and server tests idle during measurements.
 
-The September audit artifacts are under `out/linux-review-20260927/`. They are
-local investigation builds, with the original runtime defects still present.
-The updated build and qualification results are under `out/modernization-20260927/`.
-See [the modernization report](../../docs/modernization-20260927.md) for the fixes
-and the remaining host-compatibility and real-player qualification work.
+## Single-process lifecycle test
 
-## Sanitizers and CI
+```powershell
+python tools/linux/soak-candidate.py `
+  --candidate C:/bench/current/hlds_linux `
+  --instrumentation C:/bench/instrumentation --config data/rehldsm.cfg `
+  --output out/current-soak --players 32 --windows 15 `
+  --seconds 120 --warmup 60 --map-every 3 --command-burst 32
+```
 
-Use a separate output directory and add `-e BUILD_PROFILE=sanitize` to `docker run`
-to build RelWithDebInfo with AddressSanitizer and UndefinedBehaviorSanitizer.
-This profile runs the same tests with leak detection and halt-on-error enabled.
-Sanitizer binaries are diagnostics, not deployment artifacts. `BUILD_JOBS` controls
-build/test parallelism (default 4).
+The probe supports at most 120 seconds/window; 15 windows provide 30 measured
+minutes plus warmups and reload work. All windows share one process and are
+not independent repetitions. Five-second resource polling, engine-response
+heartbeats and lifecycle markers add monitoring overhead; do not compare this
+directly against unmonitored runs.
 
-GitHub Actions runs both Linux profiles and retains their output, alongside the
-Windows build/test job. Branch runs upload packages, and matching version tags
-publish GitHub releases after all checks pass; see [the release workflow](../release/README.md).
+Missing resources/telemetry, counter resets, local throttling/OOM events,
+gameplay errors, unexpected output/command failures and unclean exit fail the
+campaign. Resource growth is descriptive, not automatically a leak. Parent
+cgroup limits and host contention are not excluded by local counters.
 
-The release profile builds `frame_benchmark` and records four simulated engine
-loads at a 1000 FPS target. Its `cpp_new_calls` counts C++ `operator new` calls
-during the measured launcher loop, not all C allocations or real engine/plugin
-allocations. Run comparisons on the same CPU allocation with other work idle.
-Wall-clock FPS values are measurements, not CI pass/fail thresholds.
+Use fresh evidence directories and retain failed attempts. Share sanitized
+reports, not raw logs or private fixture settings. Fake clients do not qualify
+real-client networking, external services or long-term production stability.
+[Measured results](../../docs/benchmarks.md) and [test coverage](../../docs/testing.md)
+describe those boundaries.

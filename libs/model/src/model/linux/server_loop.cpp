@@ -157,12 +157,16 @@ namespace Model {
 
             while (!stop_requested_.load()) {
                 const auto start = FrameClock::now();
-                if (!execute_frame(serverapi_interface)) break;
+                if (!execute_frame(serverapi_interface))
+                    break;
+                const auto work_end = FrameClock::now();
+                metrics_.work_time(work_end - start);
                 sleep_thread();
-                finish_frame(start);
+                finish_legacy_frame(start, work_end);
             }
             close();
-            if (metrics_interval_) report_metrics();
+            if (metrics_interval_)
+                report_metrics();
         }
     }
 }

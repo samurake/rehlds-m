@@ -1,0 +1,2 @@
+# Host-side frame analysis and qualification tests; not a server dependency.
+numpy==2.2.5

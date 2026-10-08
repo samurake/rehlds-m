@@ -24,7 +24,7 @@
 
 #include "util/log_output.hpp"
 #include "view/base_view.hpp"
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <cstdio>
 #include <string_view>
 #include <Windows.h>

@@ -27,12 +27,14 @@ target_sources("${TARGET_NAME}"
     "${HPP_SOURCES_DIR}/server_loop.hpp"
     "${HPP_SOURCES_DIR}/frame_clock.hpp"
     "${HPP_SOURCES_DIR}/frame_metrics.hpp"
+    "${HPP_SOURCES_DIR}/metrics_reporter.hpp"
     "${HPP_SOURCES_DIR}/server_status.hpp"
     "${HPP_SOURCES_DIR}/userinput_history.hpp"
 
   PRIVATE
     "${CPP_SOURCES_DIR}/console_commands.cpp"
     "${CPP_SOURCES_DIR}/server_loop.cpp"
+    "${CPP_SOURCES_DIR}/metrics_reporter.cpp"
     "${CPP_SOURCES_DIR}/userinput_history.cpp"
 )
 
